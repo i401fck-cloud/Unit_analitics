@@ -1,12 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FF0F1115</color>
-    <color name="surface">#FF1A1D23</color>
-    <color name="text">#FFE6E8EB</color>
-    <color name="text_dim">#FF8B929C</color>
-    <color name="accent">#FF00AAFF</color>
-    <color name="green">#FF2E9E5B</color>
-    <color name="red">#FFD9453B</color>
-    <color name="log_bg">#FF000000</color>
-    <color name="log_text">#FF9BE59B</color>
+    <color name="bg">#FF0B0D12</color>
+    <color name="surface">#FF141821</color>
+    <color name="surface2">#FF1B202B</color>
+    <color name="stroke">#FF262C38</color>
+    <color name="text">#FFEEF1F6</color>
+    <color name="text_dim">#FF8A93A3</color>
+    <color name="text_faint">#FF5A6272</color>
+    <color name="accent">#FF8B6CFF</color>
+    <color name="accent_dark">#FF2A2350</color>
+    <color name="accent2">#FF22D3EE</color>
+    <color name="green">#FF22C55E</color>
+    <color name="amber">#FFF59E0B</color>
+    <color name="red">#FFEF4444</color>
+    <color name="grey">#FF6B7280</color>
+    <color name="log_bg">#FF0E1117</color>
+    <color name="aod_text">#FF59606E</color>
+    <color name="aod_dim">#FF3A404C</color>
 </resources>

@@ -1,6 +1,7 @@
 package ru.avitomonitor
 
 import android.util.Log
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,11 @@ object AppLog {
     fun e(msg: String) = add("✗", msg)
 
     @Synchronized
+    fun clear() {
+        _lines.value = emptyList()
+    }
+
+    @Synchronized
     private fun add(prefix: String, msg: String) {
         val line = "${fmt.format(Date())} $prefix $msg"
         Log.d("AvitoMonitor", line)
@@ -28,10 +34,30 @@ object AppLog {
     }
 }
 
-/** Общее состояние между Activity (владелец WebView) и сервисом (владелец таймера). */
+data class Stats(
+    val cycles: Int = 0,
+    val lastFound: Int = 0,
+    val sentTotal: Int = 0,
+    val inBase: Int = 0,
+    val captchas: Int = 0,
+    val lastCheck: Long = 0,
+    val nextCheck: Long = 0,
+    val busy: Boolean = false,
+)
+
+/** Общее состояние между Activity (владелец WebView), сервисом (таймер) и Telegram-командами. */
 object ScannerHub {
     @Volatile var driver: WebViewDriver? = null
     val running = MutableStateFlow(false)
     val captcha = MutableStateFlow(false)
+    val paused = MutableStateFlow(false)
     val status = MutableStateFlow("Остановлен")
+    val stats = MutableStateFlow(Stats())
+
+    /** Сигнал «проверить сейчас»: прерывает ожидание между циклами. */
+    val wake = Channel<Unit>(Channel.CONFLATED)
+
+    fun checkNow() {
+        wake.trySend(Unit)
+    }
 }

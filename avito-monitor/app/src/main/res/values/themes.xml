@@ -2,28 +2,102 @@
 <resources>
     <style name="Theme.AvitoMonitor" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
-        <item name="colorOnPrimary">#FF000000</item>
+        <item name="colorOnPrimary">#FFFFFFFF</item>
+        <item name="colorPrimaryContainer">@color/accent_dark</item>
+        <item name="colorOnPrimaryContainer">#FFFFFFFF</item>
+        <item name="colorSecondary">@color/accent2</item>
+        <item name="colorSecondaryContainer">@color/accent_dark</item>
+        <item name="colorOnSecondaryContainer">#FFFFFFFF</item>
         <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text</item>
+        <item name="colorOnSurfaceVariant">@color/text_dim</item>
+        <item name="colorOutline">@color/stroke</item>
         <item name="android:colorBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 
     <style name="Field" parent="Widget.Material3.TextInputLayout.OutlinedBox.Dense">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="boxCornerRadiusTopStart">12dp</item>
+        <item name="boxCornerRadiusTopEnd">12dp</item>
+        <item name="boxCornerRadiusBottomStart">12dp</item>
+        <item name="boxCornerRadiusBottomEnd">12dp</item>
+        <item name="boxStrokeColor">@color/accent</item>
     </style>
 
-    <style name="ActionButton" parent="Widget.Material3.Button">
-        <item name="android:layout_width">0dp</item>
+    <style name="Card">
+        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:background">@drawable/bg_card</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:layout_marginTop">10dp</item>
+    </style>
+
+    <style name="CardTitle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Tab" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">44dp</item>
         <item name="android:layout_weight">1</item>
-        <item name="android:layout_marginHorizontal">3dp</item>
         <item name="android:textSize">13sp</item>
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
         <item name="android:paddingHorizontal">4dp</item>
+        <item name="strokeColor">@color/stroke</item>
+        <item name="android:textColor">@color/text</item>
+    </style>
+
+    <style name="StatTile">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:background">@drawable/bg_tile</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">12dp</item>
+    </style>
+
+    <style name="StatValue">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:textSize">24sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:text">0</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+    </style>
+
+    <style name="StatLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_dim</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="IconBtn" parent="Widget.Material3.Button.IconButton.Filled.Tonal">
+        <item name="android:layout_width">52dp</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="iconSize">22dp</item>
+        <item name="android:layout_marginStart">8dp</item>
+    </style>
+
+    <style name="BarBtn" parent="Widget.Material3.Button.IconButton">
+        <item name="android:layout_width">40dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="iconSize">20dp</item>
+        <item name="iconTint">@color/text_dim</item>
     </style>
 </resources>

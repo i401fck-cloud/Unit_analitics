@@ -98,6 +98,27 @@
     return t.slice(0, 60);
   }
 
+  function imageOf(card) {
+    var best = '';
+    var maxW = -1;
+    var nodes = card.querySelectorAll('img, source');
+    for (var i = 0; i < nodes.length && !best; i++) {
+      var ss = nodes[i].getAttribute('srcset') || nodes[i].getAttribute('data-srcset') || '';
+      if (ss) {
+        ss.split(',').forEach(function (part) {
+          var p = part.trim().split(/\s+/);
+          var w = parseInt((p[1] || '').replace(/\D/g, ''), 10) || 0;
+          if (p[0] && w > maxW) { maxW = w; best = p[0]; }
+        });
+      }
+      if (!best && nodes[i].tagName === 'IMG') {
+        best = nodes[i].currentSrc || nodes[i].getAttribute('src') || nodes[i].getAttribute('data-src') || '';
+      }
+    }
+    if (!best || best.indexOf('data:') === 0) return '';
+    try { return new URL(best, location.href).href; } catch (e) { return ''; }
+  }
+
   function extract(id, card, link) {
     var title = titleOf(card, link);
     var price = priceOf(card);
@@ -126,7 +147,8 @@
       url: url,
       description: desc.slice(0, 600),
       geo: geo.slice(0, 150),
-      params: params.slice(0, 300)
+      params: params.slice(0, 300),
+      image: imageOf(card)
     };
   }
 

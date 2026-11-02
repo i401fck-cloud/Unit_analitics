@@ -1,6 +1,8 @@
 package ru.avitomonitor
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -14,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 import kotlin.random.Random
 
@@ -29,6 +32,10 @@ class WebViewDriver(private val webView: WebView) {
         webView.context.assets.open("parser.js").bufferedReader().use { it.readText() }.trim()
 
     private val bridge = Bridge()
+
+    /** Колбэки для UI (вызываются на главном потоке). */
+    var onProgress: ((Int) -> Unit)? = null
+    var onUrl: ((String) -> Unit)? = null
     @Volatile private var pageLoaded: CompletableDeferred<Unit>? = null
 
     init {
@@ -46,12 +53,20 @@ class WebViewDriver(private val webView: WebView) {
             setAcceptThirdPartyCookies(webView, true)
         }
         webView.addJavascriptInterface(bridge, "AndroidBridge")
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                onProgress?.invoke(newProgress)
+            }
+        }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 // Не даём сайту открыть приложение Avito / market:// и т.п. — остаёмся в WebView.
                 val scheme = request.url.scheme.orEmpty()
                 return scheme != "http" && scheme != "https"
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                url?.let { onUrl?.invoke(it) }
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
@@ -62,6 +77,31 @@ class WebViewDriver(private val webView: WebView) {
     }
 
     fun loadManually(url: String) = webView.loadUrl(url)
+
+    /** Снимок текущего содержимого WebView в JPEG (для /screen и алерта о капче). */
+    suspend fun screenshot(): ByteArray? = withContext(Dispatchers.Main) {
+        val w = webView.width
+        val h = webView.height
+        if (w <= 0 || h <= 0) return@withContext null
+        try {
+            val full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            webView.draw(Canvas(full))
+            val scale = minOf(1f, 1080f / w)
+            val bmp = if (scale < 1f) {
+                Bitmap.createScaledBitmap(full, (w * scale).toInt(), (h * scale).toInt(), true)
+                    .also { full.recycle() }
+            } else full
+            withContext(Dispatchers.Default) {
+                ByteArrayOutputStream().use { out ->
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                    bmp.recycle()
+                    out.toByteArray()
+                }
+            }
+        } catch (e: Throwable) {
+            null
+        }
+    }
 
     /** Полный цикл: загрузка → ожидание рендера JS → скролл → парсинг. */
     suspend fun loadAndParse(url: String): ParseResult = withContext(Dispatchers.Main) {
@@ -127,6 +167,7 @@ class WebViewDriver(private val webView: WebView) {
                     description = j.optString("description"),
                     geo = j.optString("geo"),
                     params = j.optString("params"),
+                    imageUrl = j.optString("image"),
                 )
             }
         }

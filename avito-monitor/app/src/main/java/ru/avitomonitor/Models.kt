@@ -8,6 +8,7 @@ data class Listing(
     val description: String,
     val geo: String,
     val params: String,
+    val imageUrl: String = "",
 ) {
     /** Числовая цена из строки вида "12 500 ₽"; null, если цены нет ("Договорная" и т.п.). */
     val priceValue: Long?
@@ -28,7 +29,19 @@ data class Config(
     val stopWords: List<String>,
     val priceMin: Long?,
     val priceMax: Long?,
+    val sendPhotos: Boolean = true,
 ) {
+    fun describeFilters(): String {
+        val price = when {
+            priceMin != null && priceMax != null -> "$priceMin – $priceMax ₽"
+            priceMin != null -> "от $priceMin ₽"
+            priceMax != null -> "до $priceMax ₽"
+            else -> "любая"
+        }
+        val words = if (stopWords.isEmpty()) "нет" else stopWords.joinToString(", ")
+        return "Цена: $price\nСтоп-слова: $words\nИнтервал: $intervalSec с (+15–40 с случайно)"
+    }
+
     /** Возвращает причину отсева или null, если объявление проходит фильтры. */
     fun rejectReason(item: Listing): String? {
         val hay = "${item.title} ${item.description} ${item.params}".lowercase()
