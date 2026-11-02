@@ -17,8 +17,15 @@
     return clean(el.textContent);
   }
 
-  // Ссылка на объявление Avito оканчивается на _<ID>: /moskva/telefony/iphone_15_1234567890
-  var ID_RE = /_(\d{6,})\/?$/;
+  // Ссылка на объявление Avito оканчивается на ID (7–12 цифр): /moskva/telefony/iphone_15_1234567890,
+  // в мобильной вёрстке встречаются и /items/1234567890, и ...-1234567890
+  var ID_RE = /(?:_|\/|-)(\d{7,12})\/?$/;
+  // Ссылкой считаем не только <a href>, но и элементы с data-href / data-url (SPA-вёрстка)
+  var LINK_SEL = 'a[href], [data-href], [data-url]';
+
+  function hrefOf(el) {
+    return (el && (el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-url'))) || '';
+  }
 
   function idFromHref(href) {
     if (!href) return null;
@@ -39,9 +46,9 @@
 
   function itemIdsIn(el) {
     var set = {};
-    var links = el.querySelectorAll('a[href]');
+    var links = el.querySelectorAll(LINK_SEL);
     for (var i = 0; i < links.length; i++) {
-      var id = idFromHref(links[i].getAttribute('href'));
+      var id = idFromHref(hrefOf(links[i]));
       if (id) set[id] = true;
     }
     return Object.keys(set);
@@ -71,14 +78,23 @@
     if (!t && link) t = clean(link.getAttribute('title'));
     if (!t) t = txt(card, 'h3') || txt(card, 'h2');
     if (!t) {
-      var links = card.querySelectorAll('a[href]');
+      var links = card.querySelectorAll(LINK_SEL);
       var longest = '';
       for (var i = 0; i < links.length; i++) {
-        if (!idFromHref(links[i].getAttribute('href'))) continue;
+        if (!idFromHref(hrefOf(links[i]))) continue;
         var s = clean(links[i].textContent);
         if (s.length > longest.length && s.length < 200) longest = s;
       }
       t = longest;
+    }
+    if (!t) {
+      // Первый «текстовый» элемент карточки: не цена, не дата, не короткая метка
+      var leaves = card.querySelectorAll('span, div, p, h3, h4, strong');
+      for (var j = 0; j < leaves.length && !t; j++) {
+        if (leaves[j].children.length) continue;
+        var lt = clean(leaves[j].textContent);
+        if (lt.length >= 6 && lt.indexOf('₽') < 0 && !/^[\d\s:.,]+$/.test(lt)) t = lt;
+      }
     }
     return t.slice(0, 200);
   }
@@ -90,6 +106,15 @@
             txt(card, '[data-marker*="price"]') ||
             txt(card, '[itemprop="price"]') ||
             txt(card, '[class*="price-price"]');
+    if (!t) {
+      // Мобильная вёрстка без маркеров: ищем отдельный элемент с ценой («95 000 ₽», «от 1 500 ₽»)
+      var leaves = card.querySelectorAll('span, div, p, strong, b');
+      for (var i = 0; i < leaves.length && !t; i++) {
+        if (leaves[i].children.length) continue;
+        var lt = clean(leaves[i].textContent);
+        if (lt.length < 40 && /^(от\s)?\d[\d ]*\s?₽/.test(lt)) t = lt;
+      }
+    }
     if (!t) {
       var m = clean(card.innerText || card.textContent).match(/\d[\d ]*\s?₽/);
       if (m) t = clean(m[0]);
@@ -139,7 +164,7 @@
       });
       desc = clean(full);
     }
-    var url = (link && absUrl(link.getAttribute('href'))) || ('https://www.avito.ru/' + id);
+    var url = (link && absUrl(hrefOf(link))) || ('https://www.avito.ru/' + id);
     return {
       id: id,
       title: title,
@@ -159,9 +184,9 @@
     function add(id, card, link) {
       if (cards[id]) return;
       if (!link) {
-        var ls = card.querySelectorAll('a[href]');
+        var ls = card.querySelectorAll(LINK_SEL);
         for (var i = 0; i < ls.length; i++) {
-          if (idFromHref(ls[i].getAttribute('href')) === id) { link = ls[i]; break; }
+          if (idFromHref(hrefOf(ls[i])) === id) { link = ls[i]; break; }
         }
       }
       cards[id] = { card: card, link: link };
@@ -175,11 +200,17 @@
       if (/^\d{6,}$/.test(did || '')) add(did, withId[i], null);
     }
 
+    var withDomId = document.querySelectorAll('[id^="i"]');
+    for (var d = 0; d < withDomId.length; d++) {
+      var dm2 = /^i(\d{7,12})$/.exec(withDomId[d].id || '');
+      if (dm2) add(dm2[1], withDomId[d], null);
+    }
+
     // 2) Любая вёрстка (в т.ч. m.avito.ru): ссылки вида ..._<ID>
-    var anchors = document.querySelectorAll('a[href]');
+    var anchors = document.querySelectorAll(LINK_SEL);
     for (var j = 0; j < anchors.length; j++) {
       var a = anchors[j];
-      var aid = idFromHref(a.getAttribute('href'));
+      var aid = idFromHref(hrefOf(a));
       if (!aid || cards[aid]) continue;
       add(aid, findCard(a, aid), a);
     }
@@ -221,13 +252,60 @@
     }
     var captcha = hit !== '' && items.length === 0;
 
+    // Диагностика: если карточек нет — описываем структуру страницы, чтобы подстроить парсер
+    var diag = null;
+    if (items.length === 0 && !captcha) {
+      try {
+        var links = document.querySelectorAll(LINK_SEL);
+        var hrefs = [];
+        var seenH = {};
+        for (var h = 0; h < links.length && hrefs.length < 40; h++) {
+          var hv = hrefOf(links[h]).split('#')[0].slice(0, 160);
+          if (hv && !seenH[hv]) { seenH[hv] = 1; hrefs.push(hv); }
+        }
+        var mk = {};
+        var withMarker = document.querySelectorAll('[data-marker]');
+        for (var w = 0; w < withMarker.length; w++) {
+          var mv = withMarker[w].getAttribute('data-marker');
+          mk[mv] = (mk[mv] || 0) + 1;
+        }
+        var markersTop = Object.keys(mk).sort(function (x, y) { return mk[y] - mk[x]; }).slice(0, 40)
+          .map(function (x) { return x + ' ×' + mk[x]; });
+        // Кусок вёрстки вокруг первой цены — так видно, как устроена карточка
+        var snippet = '';
+        var all = document.querySelectorAll('span, div, p, strong, b');
+        for (var z = 0; z < all.length; z++) {
+          var el = all[z];
+          if (el.children.length === 0 && /\d[\d\s]*\s?₽/.test(el.textContent || '')) {
+            var box = el;
+            for (var up = 0; up < 7 && box.parentElement && box.parentElement !== body; up++) box = box.parentElement;
+            snippet = box.outerHTML.slice(0, 6000);
+            break;
+          }
+        }
+        diag = {
+          anchors: document.querySelectorAll('a').length,
+          linksWithHref: links.length,
+          dataMarkers: withMarker.length,
+          itemIdAttrs: document.querySelectorAll('[data-item-id]').length,
+          bodyTextLength: bodyText.length,
+          hrefs: hrefs,
+          markers: markersTop,
+          snippet: snippet
+        };
+      } catch (e) {
+        diag = { error: String(e) };
+      }
+    }
+
     send({
       ok: true,
       captcha: captcha,
       reason: hit,
       items: captcha ? [] : items,
       title: document.title || '',
-      url: location.href
+      url: location.href,
+      diag: diag
     });
   } catch (e) {
     send({ ok: false, error: String((e && e.message) || e) });

@@ -24,7 +24,12 @@ data class Listing(
 }
 
 sealed interface ParseResult {
-    data class Items(val items: List<Listing>, val pageTitle: String, val pageUrl: String) : ParseResult
+    data class Items(
+        val items: List<Listing>,
+        val pageTitle: String,
+        val pageUrl: String,
+        val diag: String? = null,
+    ) : ParseResult
     data class Captcha(val reason: String, val pageUrl: String) : ParseResult
     data class Error(val message: String) : ParseResult
 }

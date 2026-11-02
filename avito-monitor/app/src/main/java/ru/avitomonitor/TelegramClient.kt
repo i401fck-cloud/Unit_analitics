@@ -120,6 +120,17 @@ object TelegramClient {
         return call(token, "sendPhoto", body, attempts = 2).map { }
     }
 
+    suspend fun sendDocument(token: String, chatId: String, fileName: String, bytes: ByteArray, captionHtml: String): Result<Unit> {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("chat_id", chatId)
+            .addFormDataPart("caption", captionHtml)
+            .addFormDataPart("parse_mode", "HTML")
+            .addFormDataPart("document", fileName, bytes.toRequestBody("text/plain".toMediaType()))
+            .build()
+        return call(token, "sendDocument", body, attempts = 2).map { }
+    }
+
     /** Карточка объявления: фото + подпись + кнопка «Открыть». Если фото не прошло — текстом. */
     suspend fun sendListing(cfg: Config, item: Listing, tag: String?): Result<Unit> {
         val kb = keyboard(listOf(urlButton("🔗 Открыть на Avito", item.url)))

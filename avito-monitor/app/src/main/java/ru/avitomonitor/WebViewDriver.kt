@@ -254,7 +254,22 @@ class WebViewDriver(private val webView: WebView) {
                 )
             }
         }
-        return ParseResult.Items(items, o.optString("title"), pageUrl)
+        val diag = o.optJSONObject("diag")?.let { d ->
+            buildString {
+                append("URL: ").append(pageUrl).append('\n')
+                append("Заголовок: ").append(o.optString("title")).append('\n')
+                append("Ссылок <a>: ").append(d.optInt("anchors")).append(", элементов-ссылок: ").append(d.optInt("linksWithHref"))
+                append(", data-marker: ").append(d.optInt("dataMarkers")).append(", data-item-id: ").append(d.optInt("itemIdAttrs"))
+                append(", текста: ").append(d.optInt("bodyTextLength")).append("\n\n")
+                append("== Ссылки ==\n")
+                d.optJSONArray("hrefs")?.let { a -> for (i in 0 until a.length()) append(a.optString(i)).append('\n') }
+                append("\n== data-marker ==\n")
+                d.optJSONArray("markers")?.let { a -> for (i in 0 until a.length()) append(a.optString(i)).append('\n') }
+                append("\n== Вёрстка вокруг первой цены ==\n").append(d.optString("snippet"))
+                if (d.has("error")) append("\n\nОшибка: ").append(d.optString("error"))
+            }
+        }
+        return ParseResult.Items(items, o.optString("title"), pageUrl, diag)
     }
 
     /** Мост JS → Kotlin. Принимает только ответ на текущий запрос (проверка токена). */

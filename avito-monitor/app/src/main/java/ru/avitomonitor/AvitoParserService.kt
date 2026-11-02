@@ -152,6 +152,7 @@ class AvitoParserService : Service() {
                     is ParseResult.Items -> {
                         found += result.items.size
                         process(cycle, search, result.items, cfg)
+                        if (result.items.isEmpty() && result.diag != null) sendDiag(cfg, search, result.diag)
                     }
                     is ParseResult.Captcha -> waitForCaptcha(cycle, search, cfg, result)
                     is ParseResult.Error -> AppLog.e("#$cycle ${search.name}: ${result.message}")
@@ -643,6 +644,21 @@ class AvitoParserService : Service() {
     )
 
     private fun cancelKb() = TelegramClient.keyboard(listOf(TelegramClient.cbButton("✖️ Отмена", "x")))
+
+    private val diagSent = HashSet<String>()
+
+    /** Один раз за запуск на поиск: структура страницы, если парсер не нашёл карточек. */
+    private suspend fun sendDiag(cfg: Config, search: Search, diag: String) {
+        if (!diagSent.add(search.id)) return
+        AppLog.w("${search.name}: карточки не распознаны — отправляю диагностику в Telegram")
+        TelegramClient.sendDocument(
+            cfg.token, cfg.chatId,
+            "diag-${search.id}.txt",
+            diag.toByteArray(Charsets.UTF_8),
+            "🧪 «${esc(search.name)}»: на странице не распознаны карточки объявлений.\n" +
+                "Перешлите этот файл разработчику — по нему парсер подстраивается под вёрстку Avito.",
+        ).onFailure { AppLog.e("Диагностика: ${it.message}") }
+    }
 
     private suspend fun sendScreen(cfg: Config, caption: String): Boolean {
         val jpeg = ScannerHub.driver?.screenshot() ?: return false
