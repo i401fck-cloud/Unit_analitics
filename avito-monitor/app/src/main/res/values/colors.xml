@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FF0F1115</color>
+    <color name="surface">#FF1A1D23</color>
+    <color name="text">#FFE6E8EB</color>
+    <color name="text_dim">#FF8B929C</color>
+    <color name="accent">#FF00AAFF</color>
+    <color name="green">#FF2E9E5B</color>
+    <color name="red">#FFD9453B</color>
+    <color name="log_bg">#FF000000</color>
+    <color name="log_text">#FF9BE59B</color>
+</resources>
