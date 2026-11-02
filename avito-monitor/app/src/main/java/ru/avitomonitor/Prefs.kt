@@ -3,13 +3,11 @@ package ru.avitomonitor
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import org.json.JSONArray
 
 class Prefs(context: Context) {
     private val sp = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    var url: String
-        get() = sp.getString("url", "").orEmpty()
-        set(v) = sp.edit().putString("url", v).apply()
     var token: String
         get() = sp.getString("token", "").orEmpty()
         set(v) = sp.edit().putString("token", v).apply()
@@ -19,15 +17,6 @@ class Prefs(context: Context) {
     var intervalSec: Int
         get() = sp.getInt("interval", DEFAULT_INTERVAL)
         set(v) = sp.edit().putInt("interval", v).apply()
-    var stopWords: String
-        get() = sp.getString("stop_words", "").orEmpty()
-        set(v) = sp.edit().putString("stop_words", v).apply()
-    var priceMin: String
-        get() = sp.getString("price_min", "").orEmpty()
-        set(v) = sp.edit().putString("price_min", v).apply()
-    var priceMax: String
-        get() = sp.getString("price_max", "").orEmpty()
-        set(v) = sp.edit().putString("price_max", v).apply()
 
     var attachMode: AttachMode
         get() = AttachMode.of(sp.getString("attach_mode", null))
@@ -38,36 +27,85 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_night", true)
         set(v) = sp.edit().putBoolean("auto_night", v).apply()
 
+    /** Пользователь нажал Старт и не нажимал Стоп (для перезапуска сервиса системой). */
+    var serviceEnabled: Boolean
+        get() = sp.getBoolean("service_enabled", false)
+        set(v) = sp.edit().putBoolean("service_enabled", v).apply()
+
+    // ------------------------------------------------------------------ поиски
+
+    var searches: List<Search>
+        get() {
+            val raw = sp.getString(KEY_SEARCHES, null)
+            if (raw == null) return migrateLegacy()
+            val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+            return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(Search::fromJson) }
+        }
+        set(v) {
+            val arr = JSONArray()
+            v.forEach { arr.put(it.toJson()) }
+            sp.edit().putString(KEY_SEARCHES, arr.toString()).apply()
+        }
+
+    @Synchronized
+    fun updateSearch(id: String, change: (Search) -> Search?) {
+        searches = searches.mapNotNull { if (it.id == id) change(it) else it }
+    }
+
+    @Synchronized
+    fun addSearch(s: Search) {
+        searches = searches + s
+    }
+
+    fun search(id: String): Search? = searches.firstOrNull { it.id == id }
+
+    /** Версия 1 хранила одну ссылку и фильтры отдельными ключами — переносим в список. */
+    private fun migrateLegacy(): List<Search> {
+        val url = sp.getString("url", "").orEmpty()
+        val list = if (url.isBlank()) emptyList() else listOf(
+            Search(
+                id = Search.newId(),
+                name = Search.guessName(url),
+                url = url,
+                priceMin = sp.getString("price_min", "").orEmpty().filter { it.isDigit() }.toLongOrNull(),
+                priceMax = sp.getString("price_max", "").orEmpty().filter { it.isDigit() }.toLongOrNull(),
+                stopWords = Search.parseWords(sp.getString("stop_words", "").orEmpty()),
+            )
+        )
+        searches = list
+        return list
+    }
+
+    /** Ссылки, для которых уже выполнен «тихий» первый проход. */
+    fun isSeeded(url: String) = url in sp.getStringSet(KEY_SEEDED, emptySet()).orEmpty()
+
+    fun markSeeded(url: String) {
+        val set = sp.getStringSet(KEY_SEEDED, emptySet()).orEmpty().toMutableSet()
+        set += url
+        sp.edit().putStringSet(KEY_SEEDED, set).apply()
+    }
+
+    fun clearSeeded() = sp.edit().remove(KEY_SEEDED).apply()
+
     fun registerListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.registerOnSharedPreferenceChangeListener(l)
 
     fun unregisterListener(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         sp.unregisterOnSharedPreferenceChangeListener(l)
 
-    /** URL, для которого уже выполнен «тихий» первый проход. */
-    var seededUrl: String
-        get() = sp.getString("seeded_url", "").orEmpty()
-        set(v) = sp.edit().putString("seeded_url", v).apply()
-
-    /** Пользователь нажал Старт и не нажимал Стоп (для перезапуска сервиса системой). */
-    var serviceEnabled: Boolean
-        get() = sp.getBoolean("service_enabled", false)
-        set(v) = sp.edit().putBoolean("service_enabled", v).apply()
-
     fun config() = Config(
-        url = url,
         token = token.trim(),
         chatId = chatId.trim(),
         intervalSec = intervalSec.coerceAtLeast(MIN_INTERVAL),
-        stopWords = stopWords.split(',', ';', '\n').map { it.trim().lowercase() }.filter { it.isNotEmpty() },
-        priceMin = priceMin.filter { it.isDigit() }.toLongOrNull(),
-        priceMax = priceMax.filter { it.isDigit() }.toLongOrNull(),
         attach = attachMode,
+        searches = searches,
     )
 
     companion object {
         const val DEFAULT_INTERVAL = 45
         const val MIN_INTERVAL = 30
+        const val KEY_SEARCHES = "searches"
+        private const val KEY_SEEDED = "seeded_urls"
 
         /** Добавляет https:// и принудительно ставит сортировку по дате (s=104). */
         fun normalizeUrl(raw: String): String {
@@ -83,5 +121,11 @@ class Prefs(context: Context) {
             b.appendQueryParameter("s", "104")
             return b.build().toString()
         }
+
+        fun isAvito(url: String) = Uri.parse(url).host.orEmpty().endsWith("avito.ru")
+
+        /** Достаёт ссылку из текста «поделиться» (там бывает название + ссылка). */
+        fun extractUrl(text: String): String? =
+            Regex("""https?://\S*avito\.ru\S*""").find(text)?.value?.trimEnd('.', ',', ')')
     }
 }

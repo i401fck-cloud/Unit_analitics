@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.avitomonitor.databinding.ActivityMainBinding
+import ru.avitomonitor.databinding.DialogSearchBinding
+import ru.avitomonitor.databinding.ItemSearchBinding
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,10 +75,11 @@ class MainActivity : AppCompatActivity() {
     /** Изменения из Telegram-команд (/price, /words, /interval, /url) сразу видны в полях. */
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
-            "url" -> setField(b.etUrl, prefs.url).also { updateSubtitle() }
-            "price_min" -> setField(b.etPriceMin, prefs.priceMin)
-            "price_max" -> setField(b.etPriceMax, prefs.priceMax)
-            "stop_words" -> setField(b.etStopWords, prefs.stopWords)
+            Prefs.KEY_SEARCHES -> {
+                renderSearchList()
+                renderOverviewSearches()
+                updateSubtitle()
+            }
             "interval" -> setField(b.etInterval, prefs.intervalSec.toString())
             "attach_mode" -> showAttachMode(prefs.attachMode)
         }
@@ -129,11 +132,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Сразу открываем Avito, чтобы можно было войти в аккаунт / пройти проверку до старта
-        if (!ScannerHub.running.value) driver.loadManually(prefs.url.ifBlank { "https://m.avito.ru" })
+        if (!ScannerHub.running.value) driver.loadManually(homeUrl())
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { AppLog.lines.collect { renderLog(it) } }
+                launch { ScannerHub.searchStats.collect { renderOverviewSearches() } }
                 launch {
                     combine(
                         ScannerHub.running, ScannerHub.captcha, ScannerHub.paused,
@@ -261,7 +265,8 @@ class MainActivity : AppCompatActivity() {
 
         b.btnWebBack.setOnClickListener { if (b.webView.canGoBack()) b.webView.goBack() }
         b.btnWebReload.setOnClickListener { b.webView.reload() }
-        b.btnWebHome.setOnClickListener { driver.loadManually(prefs.url.ifBlank { "https://m.avito.ru" }) }
+        b.btnWebHome.setOnClickListener { driver.loadManually(homeUrl()) }
+        b.btnAddSearch.setOnClickListener { editSearch(null) }
 
         b.btnSave.setOnClickListener {
             if (saveFields(requireAll = false)) {
@@ -312,7 +317,7 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Следующий проход снова будет «тихим»: текущие объявления попадут в базу без отправки.")
             .setPositiveButton("Очистить") { _, _ ->
                 SeenStore.get(this).clear()
-                prefs.seededUrl = ""
+                prefs.clearSeeded()
                 ScannerHub.stats.update { it.copy(inBase = 0) }
                 updateBaseInfo()
                 AppLog.ok("База ID очищена")
@@ -348,15 +353,12 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ настройки
 
     private fun fillFields() {
-        setField(b.etUrl, prefs.url)
         setField(b.etToken, prefs.token)
         setField(b.etChatId, prefs.chatId)
         setField(b.etInterval, prefs.intervalSec.toString())
-        setField(b.etStopWords, prefs.stopWords)
-        setField(b.etPriceMin, prefs.priceMin)
-        setField(b.etPriceMax, prefs.priceMax)
         showAttachMode(prefs.attachMode)
         b.switchAutoNight.isChecked = prefs.autoNight
+        renderSearchList()
     }
 
     private fun showAttachMode(mode: AttachMode) {
@@ -385,12 +387,6 @@ class MainActivity : AppCompatActivity() {
 
     /** Сохраняет поля (сервис подхватывает их на следующем цикле). */
     private fun saveFields(requireAll: Boolean): Boolean {
-        val rawUrl = b.etUrl.text.toString()
-        val url = Prefs.normalizeUrl(rawUrl)
-        if (url.isNotBlank() && !Uri.parse(url).host.orEmpty().endsWith("avito.ru")) {
-            toast("Ссылка должна вести на avito.ru")
-            return false
-        }
         val token = b.etToken.text.toString().trim()
         val chat = b.etChatId.text.toString().trim()
         var interval = b.etInterval.text.toString().toIntOrNull() ?: Prefs.DEFAULT_INTERVAL
@@ -398,21 +394,14 @@ class MainActivity : AppCompatActivity() {
             interval = Prefs.MIN_INTERVAL
             toast("Минимальный интервал — ${Prefs.MIN_INTERVAL} с")
         }
-        setField(b.etUrl, url)
         setField(b.etInterval, interval.toString())
-
-        prefs.url = url
         prefs.token = token
         prefs.chatId = chat
         prefs.intervalSec = interval
-        prefs.stopWords = b.etStopWords.text.toString().trim()
-        prefs.priceMin = b.etPriceMin.text.toString().trim()
-        prefs.priceMax = b.etPriceMax.text.toString().trim()
-        updateSubtitle()
 
         if (!requireAll) return true
         val error = when {
-            url.isBlank() -> "Укажите ссылку поиска Avito"
+            prefs.searches.none { it.enabled } -> "Добавьте хотя бы один включённый поиск"
             token.isBlank() -> "Укажите Telegram Bot Token"
             chat.isBlank() -> "Укажите Telegram Chat ID"
             else -> null
@@ -423,22 +412,131 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBaseInfo() {
         val n = SeenStore.get(this).size()
-        val seeded = prefs.url.isNotBlank() && prefs.seededUrl == prefs.url
         b.tvBaseInfo.text = "В базе $n из ${SeenStore.MAX_IDS} ID.\n" +
-            if (seeded) "Первый проход по текущей ссылке выполнен." else "Первый проход по ссылке будет тихим."
+            "Первая проверка каждой новой ссылки — тихая: объявления запоминаются без отправки."
     }
 
     private fun updateSubtitle() {
-        val url = prefs.url
-        if (url.isBlank()) {
-            b.tvSubtitle.text = "Сканер новых объявлений"
-            return
+        val list = prefs.searches.filter { it.enabled }
+        b.tvSubtitle.text = when (list.size) {
+            0 -> "Добавьте поиск в настройках"
+            1 -> list[0].name
+            else -> "${list.size} поиска: " + list.joinToString(", ") { it.name }
         }
-        val u = Uri.parse(url)
-        val path = u.pathSegments.filter { it.isNotBlank() }.take(3).joinToString(" › ")
-        val q = u.getQueryParameter("q")?.let { "«$it»" }
-        b.tvSubtitle.text = listOfNotNull(path.ifBlank { null }, q).joinToString("  ").ifBlank { "Сканер новых объявлений" }
     }
+
+    private fun homeUrl(): String = prefs.searches.firstOrNull { it.enabled }?.url ?: "https://m.avito.ru"
+
+    // ------------------------------------------------------------------ поиски
+
+    /** Список поисков в настройках: тап — изменить, переключатель — вкл/выкл. */
+    private fun renderSearchList() {
+        val list = prefs.searches
+        b.searchList.removeAllViews()
+        list.forEach { s ->
+            val row = ItemSearchBinding.inflate(layoutInflater, b.searchList, false)
+            row.tvName.text = s.name
+            row.tvLine1.text = s.url.removePrefix("https://").removePrefix("www.")
+            row.tvLine2.text = "${s.priceText()} · ${s.wordsText()}"
+            row.swEnabled.isChecked = s.enabled
+            row.swEnabled.setOnCheckedChangeListener { _, c ->
+                prefs.updateSearch(s.id) { it.copy(enabled = c) }
+                if (c) ScannerHub.checkNow()
+            }
+            row.root.setOnClickListener { editSearch(s) }
+            b.searchList.addView(row.root)
+        }
+        if (list.isEmpty()) {
+            b.searchList.addView(
+                android.widget.TextView(this).apply {
+                    text = "Поисков пока нет — нажмите «Добавить поиск»."
+                    setTextColor(ContextCompat.getColor(context, R.color.text_dim))
+                    textSize = 13f
+                    setPadding(0, dp(10), 0, 0)
+                }
+            )
+        }
+    }
+
+    /** Поиски на вкладке «Обзор»: сколько на странице, медиана цены, отправлено. */
+    private fun renderOverviewSearches() {
+        val list = prefs.searches
+        val stats = ScannerHub.searchStats.value
+        b.overviewSearchesCard.isVisible = list.isNotEmpty()
+        b.overviewSearches.removeAllViews()
+        list.forEach { s ->
+            val row = ItemSearchBinding.inflate(layoutInflater, b.overviewSearches, false)
+            val st = stats[s.id]
+            row.tvName.text = s.name
+            row.tvName.alpha = if (s.enabled) 1f else 0.5f
+            row.tvLine1.text = when {
+                !s.enabled -> "выключен"
+                st == null -> "ещё не проверялся · ${s.priceText()}"
+                else -> "на странице ${st.found} · отправлено ${st.sent} · ${time(st.checkedAt)}"
+            }
+            val market = st?.let { MarketSummary.of(it.items, s) }
+            row.tvLine2.isVisible = market != null
+            if (market != null) row.tvLine2.text = "медиана ${money(market.median)} · обычно ${money(market.p25)}–${money(market.p75)}"
+            row.swEnabled.isVisible = false
+            row.root.setOnClickListener { editSearch(s) }
+            b.overviewSearches.addView(row.root)
+        }
+    }
+
+    private fun editSearch(existing: Search?) {
+        val d = DialogSearchBinding.inflate(layoutInflater)
+        existing?.let { s ->
+            d.etUrl.setText(s.url)
+            d.etName.setText(s.name)
+            d.etPriceMin.setText(s.priceMin?.toString().orEmpty())
+            d.etPriceMax.setText(s.priceMax?.toString().orEmpty())
+            d.etStopWords.setText(s.stopWords.joinToString(", "))
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(if (existing == null) "Новый поиск" else "Поиск «${existing.name}»")
+            .setView(d.root)
+            .setPositiveButton("Сохранить", null)
+            .setNegativeButton("Отмена", null)
+            .apply {
+                if (existing != null) {
+                    setNeutralButton("Удалить") { _, _ ->
+                        prefs.updateSearch(existing.id) { null }
+                        ScannerHub.searchStats.update { it - existing.id }
+                        AppLog.i("Поиск «${existing.name}» удалён")
+                    }
+                }
+            }
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val url = Prefs.extractUrl(d.etUrl.text.toString())?.let(Prefs::normalizeUrl)
+                    ?: Prefs.normalizeUrl(d.etUrl.text.toString())
+                if (url.isBlank() || !Prefs.isAvito(url)) {
+                    d.etUrl.error = "Нужна ссылка поиска avito.ru"
+                    return@setOnClickListener
+                }
+                val search = Search(
+                    id = existing?.id ?: Search.newId(),
+                    name = d.etName.text.toString().trim().ifBlank { Search.guessName(url) }.take(40),
+                    url = url,
+                    priceMin = d.etPriceMin.text.toString().filter { it.isDigit() }.toLongOrNull()?.takeIf { it > 0 },
+                    priceMax = d.etPriceMax.text.toString().filter { it.isDigit() }.toLongOrNull()?.takeIf { it > 0 },
+                    stopWords = Search.parseWords(d.etStopWords.text.toString()),
+                    enabled = existing?.enabled ?: true,
+                )
+                if (existing == null) prefs.addSearch(search) else prefs.updateSearch(existing.id) { search }
+                if (existing == null || existing.url != search.url) {
+                    ScannerHub.checkNow()
+                    if (!ScannerHub.running.value) driver.loadManually(search.url)
+                }
+                AppLog.ok("Поиск «${search.name}» сохранён")
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun time(ms: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
 
     // ------------------------------------------------------------------ состояние / UI
 

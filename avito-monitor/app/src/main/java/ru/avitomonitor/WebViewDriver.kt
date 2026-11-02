@@ -136,10 +136,30 @@ class WebViewDriver(private val webView: WebView) {
         val h = webView.height
         if (w <= 0 || h <= 0) return null
         return try {
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { webView.draw(Canvas(it)) }
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            // WebView рисует контент со сдвигом на свою прокрутку — компенсируем,
+            // иначе после скролла страницы снимок получается пустым.
+            canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
+            webView.draw(canvas)
+            if (isBlank(bmp)) {
+                bmp.recycle()
+                null
+            } else bmp
         } catch (e: Throwable) {
             null
         }
+    }
+
+    /** Однотонный кадр (страница ещё не отрисована) считаем неудачным снимком. */
+    private fun isBlank(bmp: Bitmap): Boolean {
+        val first = bmp.getPixel(bmp.width / 2, bmp.height / 2)
+        for (iy in 1..12) for (ix in 1..12) {
+            val x = (bmp.width * ix / 13).coerceIn(0, bmp.width - 1)
+            val y = (bmp.height * iy / 13).coerceIn(0, bmp.height - 1)
+            if (bmp.getPixel(x, y) != first) return false
+        }
+        return true
     }
 
     private suspend fun toJpeg(src: Bitmap): ByteArray? {

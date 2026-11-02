@@ -362,6 +362,20 @@
                                 </LinearLayout>
                             </LinearLayout>
 
+                            <!-- Поиски: последние результаты и медиана цены -->
+                            <LinearLayout
+                                android:id="@+id/overviewSearchesCard"
+                                style="@style/Card">
+
+                                <TextView style="@style/CardTitle" android:text="Поиски" />
+
+                                <LinearLayout
+                                    android:id="@+id/overviewSearches"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical" />
+                            </LinearLayout>
+
                             <!-- Журнал -->
                             <LinearLayout style="@style/Card">
 
@@ -421,72 +435,34 @@
                             android:orientation="vertical"
                             android:paddingBottom="12dp">
 
-                            <!-- Поиск -->
+                            <!-- Поиски -->
                             <LinearLayout
                                 style="@style/Card"
                                 android:layout_marginTop="0dp">
 
-                                <TextView style="@style/CardTitle" android:text="🔎  Поиск" />
+                                <TextView style="@style/CardTitle" android:text="🔎  Поиски" />
 
-                                <com.google.android.material.textfield.TextInputLayout
-                                    style="@style/Field"
-                                    android:hint="Ссылка поиска Avito">
-
-                                    <com.google.android.material.textfield.TextInputEditText
-                                        android:id="@+id/etUrl"
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:inputType="textUri"
-                                        android:maxLines="3" />
-                                </com.google.android.material.textfield.TextInputLayout>
-
-                                <LinearLayout
+                                <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:orientation="horizontal">
+                                    android:layout_marginTop="2dp"
+                                    android:text="Каждый поиск — своя ссылка, цена и стоп-слова. Нажмите, чтобы изменить."
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="12sp" />
 
-                                    <com.google.android.material.textfield.TextInputLayout
-                                        style="@style/Field"
-                                        android:layout_width="0dp"
-                                        android:layout_marginEnd="5dp"
-                                        android:layout_weight="1"
-                                        android:hint="Цена от, ₽">
+                                <LinearLayout
+                                    android:id="@+id/searchList"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical" />
 
-                                        <com.google.android.material.textfield.TextInputEditText
-                                            android:id="@+id/etPriceMin"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:inputType="number"
-                                            android:maxLines="1" />
-                                    </com.google.android.material.textfield.TextInputLayout>
-
-                                    <com.google.android.material.textfield.TextInputLayout
-                                        style="@style/Field"
-                                        android:layout_width="0dp"
-                                        android:layout_marginStart="5dp"
-                                        android:layout_weight="1"
-                                        android:hint="Цена до, ₽">
-
-                                        <com.google.android.material.textfield.TextInputEditText
-                                            android:id="@+id/etPriceMax"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:inputType="number"
-                                            android:maxLines="1" />
-                                    </com.google.android.material.textfield.TextInputLayout>
-                                </LinearLayout>
-
-                                <com.google.android.material.textfield.TextInputLayout
-                                    style="@style/Field"
-                                    android:hint="Стоп-слова через запятую">
-
-                                    <com.google.android.material.textfield.TextInputEditText
-                                        android:id="@+id/etStopWords"
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:inputType="textMultiLine"
-                                        android:maxLines="4" />
-                                </com.google.android.material.textfield.TextInputLayout>
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnAddSearch"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:text="＋  Добавить поиск" />
                             </LinearLayout>
 
                             <!-- Telegram -->
@@ -582,7 +558,7 @@
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="8dp"
-                                    android:text="Бот понимает команды: /status, /check, /pause, /resume, /screen, /price, /words, /interval, /url, /attach, /help"
+                                    android:text="В Telegram управление — кнопками под полем ввода: статус, проверка, пауза, цены рынка, скрин, поиски, настройки. Если кнопок нет — отправьте боту /start."
                                     android:textColor="@color/text_faint"
                                     android:textSize="12sp" />
                             </LinearLayout>
@@ -595,7 +571,7 @@
                                 <com.google.android.material.textfield.TextInputLayout
                                     style="@style/Field"
                                     android:hint="Интервал, сек (мин. 30)"
-                                    app:helperText="К интервалу добавляется случайно 15–40 с">
+                                    app:helperText="К интервалу добавляется случайно 4–13 с">
 
                                     <com.google.android.material.textfield.TextInputEditText
                                         android:id="@+id/etInterval"

@@ -45,6 +45,14 @@ data class Stats(
     val busy: Boolean = false,
 )
 
+/** Последний результат по одному поиску (для обзора и расчёта рыночной цены). */
+data class SearchStat(
+    val found: Int = 0,
+    val items: List<Listing> = emptyList(),
+    val checkedAt: Long = 0,
+    val sent: Int = 0,
+)
+
 /** Общее состояние между Activity (владелец WebView), сервисом (таймер) и Telegram-командами. */
 object ScannerHub {
     @Volatile var driver: WebViewDriver? = null
@@ -53,6 +61,7 @@ object ScannerHub {
     val paused = MutableStateFlow(false)
     val status = MutableStateFlow("Остановлен")
     val stats = MutableStateFlow(Stats())
+    val searchStats = MutableStateFlow<Map<String, SearchStat>>(emptyMap())
 
     /** Сигнал «проверить сейчас»: прерывает ожидание между циклами. */
     val wake = Channel<Unit>(Channel.CONFLATED)

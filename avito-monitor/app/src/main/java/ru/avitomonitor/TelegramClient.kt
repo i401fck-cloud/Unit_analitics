@@ -121,14 +121,59 @@ object TelegramClient {
     }
 
     /** Карточка объявления: фото + подпись + кнопка «Открыть». Если фото не прошло — текстом. */
-    suspend fun sendListing(cfg: Config, item: Listing): Result<Unit> {
+    suspend fun sendListing(cfg: Config, item: Listing, tag: String?): Result<Unit> {
         val kb = keyboard(listOf(urlButton("🔗 Открыть на Avito", item.url)))
         if (cfg.attach != AttachMode.NONE && item.imageUrl.startsWith("http")) {
-            val r = sendPhotoUrl(cfg.token, cfg.chatId, item.imageUrl, formatListing(item, 1024), kb)
+            val r = sendPhotoUrl(cfg.token, cfg.chatId, item.imageUrl, formatListing(item, 1024, tag), kb)
             if (r.isSuccess) return r
             AppLog.w("Фото не отправилось (${r.exceptionOrNull()?.message}), шлю текстом")
         }
-        return send(cfg.token, cfg.chatId, formatListing(item, 4096), preview = false, keyboard = kb)
+        return send(cfg.token, cfg.chatId, formatListing(item, 4096, tag), preview = false, keyboard = kb)
+    }
+
+    // ------------------------------------------------------------------ кнопки под полем ввода
+
+    const val BTN_STATUS = "📊 Статус"
+    const val BTN_CHECK = "🔄 Проверить"
+    const val BTN_PAUSE = "⏸ Пауза"
+    const val BTN_RESUME = "▶️ Продолжить"
+    const val BTN_MARKET = "💰 Цены рынка"
+    const val BTN_SCREEN = "📸 Скрин"
+    const val BTN_SEARCHES = "🔎 Поиски"
+    const val BTN_SETTINGS = "⚙️ Настройки"
+
+    /** Постоянная клавиатура над строкой ввода (заменяет команды). */
+    fun replyKeyboard(): String {
+        fun row(vararg t: String) = JSONArray().apply { t.forEach { put(JSONObject().put("text", it)) } }
+        return JSONObject()
+            .put(
+                "keyboard",
+                JSONArray()
+                    .put(row(BTN_STATUS, BTN_CHECK))
+                    .put(row(BTN_PAUSE, BTN_RESUME))
+                    .put(row(BTN_MARKET, BTN_SCREEN))
+                    .put(row(BTN_SEARCHES, BTN_SETTINGS)),
+            )
+            .put("resize_keyboard", true)
+            .put("is_persistent", true)
+            .put("input_field_placeholder", "Кнопки управления ниже")
+            .toString()
+    }
+
+    fun formatMarket(search: Search, m: MarketSummary?, found: Int): String = buildString {
+        append("💰 <b>").append(esc(search.name)).append("</b>\n")
+        if (m == null) {
+            append("Мало объявлений с ценой (на странице: ").append(found).append(") — оценка невозможна.")
+            return@buildString
+        }
+        append("Медиана: <b>").append(money(m.median)).append("</b>\n")
+        append("Средняя: ").append(money(m.mean)).append('\n')
+        append("Типичный диапазон: ").append(money(m.p25)).append(" – ").append(money(m.p75)).append('\n')
+        append("Мин / макс: ").append(money(m.min)).append(" / ").append(money(m.max)).append('\n')
+        append("<i>По ").append(m.count).append(" свежим объявлениям")
+        if (m.used < m.count) append(", без ").append(m.count - m.used).append(" выбросов")
+        if (search.stopWords.isNotEmpty()) append(", без стоп-слов")
+        append("</i>")
     }
 
     suspend fun answerCallback(token: String, callbackId: String, text: String = "") {
@@ -140,18 +185,9 @@ object TelegramClient {
     suspend fun setCommands(token: String): Result<Unit> {
         val cmds = JSONArray()
         listOf(
+            "start" to "Показать кнопки управления",
             "status" to "Состояние и статистика",
-            "check" to "Проверить прямо сейчас",
-            "pause" to "Поставить на паузу",
-            "resume" to "Продолжить",
-            "screen" to "Скриншот браузера на телефоне",
-            "filters" to "Текущие фильтры",
-            "price" to "Цена: /price 1000 50000 или /price off",
-            "words" to "Стоп-слова: /words битый, ремонт или /words off",
-            "interval" to "Интервал в секундах: /interval 60",
-            "url" to "Новая ссылка поиска: /url https://...",
-            "attach" to "Вложение: /attach card | page | photo | none",
-            "help" to "Список команд",
+            "help" to "Помощь",
         ).forEach { (c, d) -> cmds.put(JSONObject().put("command", c).put("description", d)) }
         val body = FormBody.Builder().add("commands", cmds.toString()).build()
         return call(token, "setMyCommands", body, attempts = 1).map { }
@@ -203,8 +239,9 @@ object TelegramClient {
     }
 
     /** HTML-карточка объявления, уложенная в [limit] символов (1024 для подписи к фото). */
-    fun formatListing(l: Listing, limit: Int): String {
+    fun formatListing(l: Listing, limit: Int, tag: String? = null): String {
         val head = buildString {
+            if (!tag.isNullOrBlank()) append("🔎 ").append(esc(tag.take(40))).append('\n')
             append("🆕 <b>").append(esc(l.title.ifBlank { "Без названия" }.take(150))).append("</b>\n")
             if (l.price.isNotBlank()) append("💰 <b>").append(esc(l.price)).append("</b>\n")
             if (l.geo.isNotBlank()) append("📍 ").append(esc(l.geo.take(120))).append('\n')

@@ -25,9 +25,9 @@ import java.util.Locale
 import kotlin.random.Random
 
 /**
- * Foreground-сервис 24/7: держит WakeLock/WifiLock, крутит рандомизированный таймер
- * и слушает команды Telegram-бота. Сам WebView живёт в MainActivity — сервис управляет
- * им через [ScannerHub.driver].
+ * Foreground-сервис 24/7: держит WakeLock/WifiLock, по очереди проверяет все включённые поиски
+ * и обслуживает Telegram-бота (кнопки под полем ввода + инлайн-кнопки).
+ * Сам WebView живёт в MainActivity — сервис управляет им через [ScannerHub.driver].
  */
 class AvitoParserService : Service() {
 
@@ -40,8 +40,18 @@ class AvitoParserService : Service() {
     private lateinit var prefs: Prefs
     private lateinit var seen: SeenStore
 
-    private var emptyStreak = 0
-    private var emptyAlertSent = false
+    private val emptyStreak = HashMap<String, Int>()
+
+    /** Бот ждёт от пользователя значение (цена, стоп-слова, ссылка…). */
+    private sealed interface Pending {
+        data object AddSearch : Pending
+        data object Interval : Pending
+        data class Price(val id: String) : Pending
+        data class Words(val id: String) : Pending
+        data class Name(val id: String) : Pending
+    }
+
+    @Volatile private var pending: Pending? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -97,6 +107,7 @@ class AvitoParserService : Service() {
 
     private suspend fun runLoop() {
         AppLog.ok("Сервис запущен. В базе ${seen.size()} ID")
+        var greeted = false
         while (currentCoroutineContext().isActive) {
             if (ScannerHub.paused.value) {
                 ScannerHub.stats.update { it.copy(nextCheck = 0) }
@@ -105,10 +116,15 @@ class AvitoParserService : Service() {
                 continue
             }
             val cfg = prefs.config()
-            if (cfg.url.isBlank()) {
-                setStatus("Не задан URL поиска")
+            val searches = cfg.active
+            if (searches.isEmpty()) {
+                setStatus("Добавьте поиск в настройках или кнопкой в Telegram")
                 awaitWake(10_000)
                 continue
+            }
+            if (!greeted) {
+                greeted = true
+                tg(cfg, "▶️ Мониторинг запущен: поисков ${searches.size}.", keyboard = TelegramClient.replyKeyboard())
             }
             val driver = ScannerHub.driver
             if (driver == null) {
@@ -119,25 +135,33 @@ class AvitoParserService : Service() {
 
             val cycle = ScannerHub.stats.value.cycles + 1
             ScannerHub.stats.update { it.copy(cycles = cycle, busy = true, nextCheck = 0) }
-            setStatus("Цикл #$cycle: загрузка страницы…")
-            val result = try {
-                driver.loadAndParse(cfg.url)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                ParseResult.Error(e.message ?: e.javaClass.simpleName)
+            var found = 0
+            for ((i, search) in searches.withIndex()) {
+                if (ScannerHub.paused.value || !currentCoroutineContext().isActive) break
+                if (i > 0) delay(Random.nextLong(3_000, 8_001)) // пауза между поисками, как у человека
+                val label = if (searches.size > 1) "«${search.name}» (${i + 1}/${searches.size})" else "«${search.name}»"
+                setStatus("Цикл #$cycle: $label…")
+                val result = try {
+                    driver.loadAndParse(search.url)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ParseResult.Error(e.message ?: e.javaClass.simpleName)
+                }
+                when (result) {
+                    is ParseResult.Items -> {
+                        found += result.items.size
+                        process(cycle, search, result.items, cfg)
+                    }
+                    is ParseResult.Captcha -> waitForCaptcha(cycle, search, cfg, result)
+                    is ParseResult.Error -> AppLog.e("#$cycle ${search.name}: ${result.message}")
+                }
             }
 
-            when (result) {
-                is ParseResult.Items -> process(cycle, result.items, cfg)
-                is ParseResult.Captcha -> waitForCaptcha(cycle, cfg, result)
-                is ParseResult.Error -> AppLog.e("Цикл #$cycle: ${result.message}")
-            }
-
-            val waitMs = cfg.intervalSec * 1000L + Random.nextLong(15_000, 40_001)
+            val waitMs = cfg.intervalSec * 1000L + Random.nextLong(4_000, 13_001)
             val now = System.currentTimeMillis()
             ScannerHub.stats.update {
-                it.copy(busy = false, lastCheck = now, nextCheck = now + waitMs, inBase = seen.size())
+                it.copy(busy = false, lastFound = found, lastCheck = now, nextCheck = now + waitMs, inBase = seen.size())
             }
             AppLog.i("Следующая проверка через ${waitMs / 1000} с")
             setStatus("Последняя проверка ${time(now)} · отправлено ${ScannerHub.stats.value.sentTotal}")
@@ -149,31 +173,34 @@ class AvitoParserService : Service() {
     private suspend fun awaitWake(ms: Long): Boolean =
         withTimeoutOrNull(ms) { ScannerHub.wake.receive() } != null
 
-    private suspend fun process(cycle: Int, items: List<Listing>, cfg: Config) {
-        ScannerHub.stats.update { it.copy(lastFound = items.size) }
+    private fun updateSearchStat(id: String, change: (SearchStat) -> SearchStat) {
+        ScannerHub.searchStats.update { it + (id to change(it[id] ?: SearchStat())) }
+    }
+
+    private suspend fun process(cycle: Int, search: Search, items: List<Listing>, cfg: Config) {
+        updateSearchStat(search.id) { it.copy(found = items.size, items = items, checkedAt = System.currentTimeMillis()) }
         if (items.isEmpty()) {
-            emptyStreak++
-            AppLog.w("Цикл #$cycle: 0 карточек (подряд: $emptyStreak)")
-            if (emptyStreak >= 3 && !emptyAlertSent) {
-                emptyAlertSent = true
-                tg(cfg, "⚠️ 3 цикла подряд не найдено ни одной карточки. Проверьте браузер на телефоне.")
+            val streak = (emptyStreak[search.id] ?: 0) + 1
+            emptyStreak[search.id] = streak
+            AppLog.w("#$cycle ${search.name}: 0 карточек (подряд: $streak)")
+            if (streak == 3) {
+                tg(cfg, "⚠️ «${esc(search.name)}»: 3 цикла подряд не найдено ни одной карточки. Проверьте браузер на телефоне.")
                 sendScreen(cfg, "Так сейчас выглядит страница")
             }
             return
         }
-        emptyStreak = 0
-        emptyAlertSent = false
+        emptyStreak[search.id] = 0
 
-        // Первый проход по новому URL — молча заполняем базу
-        if (prefs.seededUrl != cfg.url) {
+        // Первый проход по новой ссылке — молча заполняем базу и присылаем рыночную цену
+        if (!prefs.isSeeded(search.url)) {
             seen.addAll(items.map { it.id })
-            prefs.seededUrl = cfg.url
-            AppLog.ok("Первый проход: ${items.size} объявлений сохранено в базу без отправки")
+            prefs.markSeeded(search.url)
+            AppLog.ok("${search.name}: первый проход, ${items.size} объявлений в базу без отправки")
+            val market = MarketSummary.of(items, search)
             tg(
                 cfg,
-                "✅ <b>Мониторинг запущен</b>\nТекущих объявлений в базе: ${items.size}\n" +
-                    "Дальше присылаю только новые.\n\n/help — команды управления",
-                keyboard = statusKeyboard(),
+                "✅ <b>${esc(search.name)}</b>: в базе ${items.size} текущих объявлений, дальше пришлю только новые." +
+                    (market?.let { "\nМедиана цены сейчас: <b>${money(it.median)}</b>" } ?: ""),
             )
             return
         }
@@ -186,18 +213,19 @@ class AvitoParserService : Service() {
 
         // Страница отсортирована от новых к старым — отправляем в хронологическом порядке
         for (item in fresh.take(MAX_PER_CYCLE).reversed()) {
-            val reason = cfg.rejectReason(item)
+            val reason = search.rejectReason(item)
             if (reason != null) {
                 seen.add(item.id)
                 filtered++
                 AppLog.i("Отсеяно ($reason): ${item.title.take(40)}")
                 continue
             }
-            val r = sendItem(cfg, item)
+            val r = sendItem(cfg, search, item, multi = cfg.active.size > 1)
             if (r.isSuccess) {
                 seen.add(item.id)
                 sent++
                 ScannerHub.stats.update { it.copy(sentTotal = it.sentTotal + 1) }
+                updateSearchStat(search.id) { it.copy(sent = it.sent + 1) }
                 AppLog.ok("→ ${item.title.take(50)} · ${item.price}")
             } else {
                 AppLog.e("Telegram: ${r.exceptionOrNull()?.message}")
@@ -207,12 +235,13 @@ class AvitoParserService : Service() {
             delay(1_100) // лимит Telegram ~1 сообщение/с в один чат
         }
 
-        val msg = "Цикл #$cycle: на странице ${items.size}, новых ${fresh.size}, отправлено $sent, отсеяно $filtered"
+        val msg = "#$cycle ${search.name}: на странице ${items.size}, новых ${fresh.size}, отправлено $sent, отсеяно $filtered"
         if (failed) AppLog.w(msg) else AppLog.ok(msg)
     }
 
     /** Скриншот (карточки или страницы) + описание + кнопка-ссылка; при неудаче — фото, затем текст. */
-    private suspend fun sendItem(cfg: Config, item: Listing): Result<Unit> {
+    private suspend fun sendItem(cfg: Config, search: Search, item: Listing, multi: Boolean): Result<Unit> {
+        val tag = if (multi) search.name else null
         val driver = ScannerHub.driver
         val shot = try {
             when (cfg.attach) {
@@ -230,19 +259,19 @@ class AvitoParserService : Service() {
         }
         if (shot != null) {
             val kb = TelegramClient.keyboard(listOf(TelegramClient.urlButton("🔗 Открыть на Avito", item.url)))
-            val r = TelegramClient.sendPhotoBytes(cfg.token, cfg.chatId, shot, TelegramClient.formatListing(item, 1024), kb)
+            val r = TelegramClient.sendPhotoBytes(cfg.token, cfg.chatId, shot, TelegramClient.formatListing(item, 1024, tag), kb)
             if (r.isSuccess) return r
             AppLog.w("Скриншот не отправился (${r.exceptionOrNull()?.message}), пробую фото/текст")
         } else if (cfg.attach == AttachMode.CARD || cfg.attach == AttachMode.PAGE) {
             AppLog.w("Скриншот не получился, отправляю фото/текст")
         }
-        return TelegramClient.sendListing(cfg, item)
+        return TelegramClient.sendListing(cfg, item, tag)
     }
 
-    private suspend fun waitForCaptcha(cycle: Int, cfg: Config, first: ParseResult.Captcha) {
+    private suspend fun waitForCaptcha(cycle: Int, search: Search, cfg: Config, first: ParseResult.Captcha) {
         ScannerHub.captcha.value = true
         ScannerHub.stats.update { it.copy(captchas = it.captchas + 1, busy = false) }
-        AppLog.w("Цикл #$cycle: КАПЧА «${first.reason}». Таймер на паузе — пройдите проверку в браузере")
+        AppLog.w("#$cycle: КАПЧА «${first.reason}». Таймер на паузе — пройдите проверку в браузере")
         setStatus("⚠️ Требуется ввод капчи!")
         Notifier.beep(this)
         Notifier.captcha(this)
@@ -258,7 +287,7 @@ class AvitoParserService : Service() {
 
             if (r is ParseResult.Items && r.items.isNotEmpty()) {
                 AppLog.ok("Капча пройдена, на странице ${r.items.size} карточек")
-                process(cycle, r.items, cfg)
+                process(cycle, search, r.items, cfg)
                 break
             }
             // Пользователь ушёл со страницы капчи (например, на логин) — 3 «чистые» проверки подряд
@@ -289,7 +318,7 @@ class AvitoParserService : Service() {
                 continue
             }
             if (offset == null || cfg.token != lastToken) {
-                // Пропускаем старые сообщения, чтобы не выполнить давние команды
+                // Пропускаем старые сообщения, чтобы не выполнить давние нажатия
                 val last = TelegramClient.getUpdates(cfg.token, -1, 0)
                 if (last.isFailure) {
                     delay(30_000)
@@ -300,114 +329,212 @@ class AvitoParserService : Service() {
                 TelegramClient.setCommands(cfg.token)
                 continue
             }
-            val res = TelegramClient.getUpdates(cfg.token, offset, 50)
-            val updates = res.getOrNull()
+            val updates = TelegramClient.getUpdates(cfg.token, offset, 50).getOrNull()
             if (updates == null) {
                 delay(15_000)
                 continue
             }
             for (u in updates) {
                 offset = u.updateId + 1
-                if (u.chatId != cfg.chatId) continue // команды только из своего чата
+                if (u.chatId != cfg.chatId) continue // управление только из своего чата
                 u.callbackId?.let { TelegramClient.answerCallback(cfg.token, it) }
-                if (u.text.startsWith("/")) {
-                    try {
-                        handleCommand(u.text.trim(), cfg)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        AppLog.e("Команда ${u.text}: ${e.message}")
-                    }
+                try {
+                    if (u.callbackId != null) onCallback(u.text, prefs.config()) else onText(u.text.trim(), prefs.config())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.e("Telegram «${u.text.take(30)}»: ${e.message}")
                 }
             }
         }
     }
 
-    private suspend fun handleCommand(text: String, cfg: Config) {
-        val cmd = text.substringBefore(' ').substringBefore('@').lowercase()
-        val arg = text.substringAfter(' ', "").trim()
-        AppLog.i("Telegram-команда: $cmd")
-        when (cmd) {
-            "/start", "/help" -> tg(cfg, HELP)
-            "/status" -> tg(cfg, statusText(cfg), keyboard = statusKeyboard())
-            "/pause" -> {
-                ScannerHub.paused.value = true
-                ScannerHub.checkNow()
-                tg(cfg, "⏸ Мониторинг на паузе.", keyboard = statusKeyboard())
+    /** Текст: кнопка нижней клавиатуры, команда или ответ на вопрос бота. */
+    private suspend fun onText(text: String, cfg: Config) {
+        when (text.substringBefore(' ').substringBefore('@').lowercase()) {
+            "/start", "/help", "/menu" -> {
+                pending = null
+                tg(cfg, HELP, keyboard = TelegramClient.replyKeyboard())
+                return
             }
-            "/resume" -> {
-                ScannerHub.paused.value = false
-                ScannerHub.checkNow()
-                tg(cfg, "▶️ Продолжаю, проверяю сейчас.", keyboard = statusKeyboard())
+            "/status" -> return showStatus(cfg)
+        }
+        when (text) {
+            TelegramClient.BTN_STATUS -> { pending = null; showStatus(cfg) }
+            TelegramClient.BTN_CHECK -> { pending = null; checkNow(cfg) }
+            TelegramClient.BTN_PAUSE -> { pending = null; setPaused(cfg, true) }
+            TelegramClient.BTN_RESUME -> { pending = null; setPaused(cfg, false) }
+            TelegramClient.BTN_MARKET -> { pending = null; showMarket(cfg, null) }
+            TelegramClient.BTN_SCREEN -> {
+                pending = null
+                if (!sendScreen(cfg, "Браузер на телефоне")) tg(cfg, "Не удалось сделать скриншот.")
             }
-            "/check" -> {
-                if (ScannerHub.paused.value) {
-                    tg(cfg, "Сейчас пауза. Нажмите «Продолжить».", keyboard = statusKeyboard())
-                } else {
-                    ScannerHub.checkNow()
-                    tg(cfg, "🔄 Проверяю прямо сейчас…")
-                }
+            TelegramClient.BTN_SEARCHES -> { pending = null; showSearches(cfg) }
+            TelegramClient.BTN_SETTINGS -> { pending = null; showSettings(cfg) }
+            else -> {
+                val p = pending
+                if (p != null) onInput(p, text, cfg)
+                else tg(cfg, "Пользуйтесь кнопками внизу 👇", keyboard = TelegramClient.replyKeyboard())
             }
-            "/screen" -> if (!sendScreen(cfg, "Браузер на телефоне")) tg(cfg, "Не удалось сделать скриншот (приложение свернуто?)")
-            "/filters" -> tg(cfg, "🎛 <b>Фильтры</b>\n" + TelegramClient.esc(cfg.describeFilters()))
-            "/price" -> {
-                val nums = Regex("\\d+").findAll(arg.replace(" ", "")).map { it.value }.toList()
-                when {
-                    arg.isBlank() -> tg(cfg, "Пример: <code>/price 1000 50000</code>, <code>/price 0 30000</code>, <code>/price off</code>")
-                    arg.equals("off", true) || arg == "-" -> { prefs.priceMin = ""; prefs.priceMax = "" }
-                    nums.size >= 2 -> { prefs.priceMin = nums[0].trimStart('0'); prefs.priceMax = nums[1] }
-                    else -> { prefs.priceMin = ""; prefs.priceMax = nums.firstOrNull().orEmpty() }
-                }
-                if (arg.isNotBlank()) tg(cfg, "✅ " + TelegramClient.esc(prefs.config().describeFilters()))
+        }
+    }
+
+    /** Нажатия инлайн-кнопок под сообщениями. */
+    private suspend fun onCallback(data: String, cfg: Config) {
+        val parts = data.split(':')
+        val id = parts.getOrNull(2).orEmpty()
+        when (parts[0]) {
+            "st" -> showStatus(cfg)
+            "chk" -> checkNow(cfg)
+            "pz" -> setPaused(cfg, true)
+            "rs" -> setPaused(cfg, false)
+            "scr" -> if (!sendScreen(cfg, "Браузер на телефоне")) tg(cfg, "Не удалось сделать скриншот.")
+            "mk" -> showMarket(cfg, parts.getOrNull(1))
+            "sl" -> showSearches(cfg)
+            "set" -> showSettings(cfg)
+            "x" -> { pending = null; tg(cfg, "Отменено.") }
+            "iv" -> {
+                pending = Pending.Interval
+                tg(cfg, "⏱ Пришлите интервал в секундах (минимум ${Prefs.MIN_INTERVAL}). Сейчас: ${cfg.intervalSec} с.", keyboard = cancelKb())
             }
-            "/words" -> {
-                if (arg.isBlank()) {
-                    tg(cfg, "Пример: <code>/words битый, ремонт, запчасти</code> или <code>/words off</code>")
-                } else {
-                    prefs.stopWords = if (arg.equals("off", true)) "" else arg
-                    tg(cfg, "✅ " + TelegramClient.esc(prefs.config().describeFilters()))
-                }
-            }
-            "/interval" -> {
-                val n = arg.toIntOrNull()
-                if (n == null) {
-                    tg(cfg, "Пример: <code>/interval 60</code> (минимум ${Prefs.MIN_INTERVAL})")
-                } else {
-                    prefs.intervalSec = n.coerceAtLeast(Prefs.MIN_INTERVAL)
-                    tg(cfg, "✅ Интервал: ${prefs.intervalSec} с (+15–40 с случайно)")
-                }
-            }
-            "/url" -> {
-                val url = Prefs.normalizeUrl(arg)
-                if (!android.net.Uri.parse(url).host.orEmpty().endsWith("avito.ru")) {
-                    tg(cfg, "Пришлите ссылку поиска Avito: <code>/url https://www.avito.ru/...</code>")
-                } else {
-                    prefs.url = url
-                    ScannerHub.checkNow()
-                    tg(cfg, "✅ Новая ссылка сохранена. Первый проход по ней будет тихим.")
-                }
-            }
-            "/attach" -> {
-                val mode = AttachMode.entries.firstOrNull { it.key == arg.lowercase() }
+            "at" -> {
+                val mode = parts.getOrNull(1)?.let { k -> AttachMode.entries.firstOrNull { it.key == k } }
                 if (mode == null) {
                     tg(
-                        cfg,
-                        "Что прикладывать к объявлениям:\n" +
-                            "<code>/attach card</code> — скриншот карточки (быстро)\n" +
-                            "<code>/attach page</code> — скриншот страницы объявления (медленнее)\n" +
-                            "<code>/attach photo</code> — фото из объявления\n" +
-                            "<code>/attach none</code> — только текст\n\nСейчас: ${cfg.attach.title}",
+                        cfg, "🖼 Что прикладывать к объявлениям? Сейчас: <b>${cfg.attach.title}</b>",
+                        keyboard = TelegramClient.keyboard(
+                            listOf(TelegramClient.cbButton("Скрин карточки", "at:card"), TelegramClient.cbButton("Скрин страницы", "at:page")),
+                            listOf(TelegramClient.cbButton("Фото", "at:photo"), TelegramClient.cbButton("Только текст", "at:none")),
+                        ),
                     )
                 } else {
                     prefs.attachMode = mode
                     tg(cfg, "✅ Вложение: ${mode.title}")
                 }
             }
-            else -> tg(cfg, "Не знаю такую команду. /help — список команд.")
+            "s" -> onSearchAction(parts.getOrNull(1).orEmpty(), id, cfg)
         }
     }
 
-    private fun statusText(cfg: Config): String {
+    private suspend fun onSearchAction(action: String, id: String, cfg: Config) {
+        if (action == "a") {
+            pending = Pending.AddSearch
+            tg(
+                cfg,
+                "➕ Пришлите ссылку поиска Avito.\n\nКак получить: настройте поиск на Avito (город, категория, фильтры) → «Поделиться» → «Копировать ссылку».",
+                keyboard = cancelKb(),
+            )
+            return
+        }
+        val s = prefs.search(id) ?: return tg(cfg, "Поиск не найден — возможно, он уже удалён.")
+        when (action) {
+            "t" -> {
+                prefs.updateSearch(id) { it.copy(enabled = !it.enabled) }
+                if (!s.enabled) ScannerHub.checkNow()
+                showSearches(prefs.config())
+            }
+            "e" -> tg(
+                cfg,
+                searchCard(s),
+                keyboard = TelegramClient.keyboard(
+                    listOf(TelegramClient.cbButton("💵 Цена", "s:p:$id"), TelegramClient.cbButton("🚫 Стоп-слова", "s:w:$id")),
+                    listOf(TelegramClient.cbButton("✏️ Название", "s:n:$id"), TelegramClient.cbButton("💰 Цены рынка", "mk:$id")),
+                    listOf(TelegramClient.cbButton("🗑 Удалить", "s:d:$id"), TelegramClient.cbButton("« Все поиски", "sl")),
+                ),
+            )
+            "p" -> {
+                pending = Pending.Price(id)
+                tg(
+                    cfg,
+                    "💵 «${esc(s.name)}»: пришлите вилку цен двумя числами, например <code>10000 50000</code>.\n" +
+                        "Только максимум: <code>0 50000</code>. Без ограничений: <code>0</code>.\nСейчас: ${s.priceText()}",
+                    keyboard = cancelKb(),
+                )
+            }
+            "w" -> {
+                pending = Pending.Words(id)
+                tg(
+                    cfg,
+                    "🚫 «${esc(s.name)}»: пришлите стоп-слова через запятую, например <code>битый, ремонт, запчасти</code>.\n" +
+                        "Убрать все: <code>-</code>\nСейчас: ${esc(s.wordsText())}",
+                    keyboard = cancelKb(),
+                )
+            }
+            "n" -> {
+                pending = Pending.Name(id)
+                tg(cfg, "✏️ Пришлите новое название для «${esc(s.name)}».", keyboard = cancelKb())
+            }
+            "d" -> tg(
+                cfg, "🗑 Удалить поиск «${esc(s.name)}»?",
+                keyboard = TelegramClient.keyboard(
+                    listOf(TelegramClient.cbButton("Да, удалить", "s:D:$id"), TelegramClient.cbButton("Нет", "sl")),
+                ),
+            )
+            "D" -> {
+                prefs.updateSearch(id) { null }
+                ScannerHub.searchStats.update { it - id }
+                tg(cfg, "🗑 Поиск «${esc(s.name)}» удалён.")
+                showSearches(prefs.config())
+            }
+        }
+    }
+
+    private suspend fun onInput(p: Pending, text: String, cfg: Config) {
+        when (p) {
+            Pending.AddSearch -> {
+                val url = Prefs.extractUrl(text)?.let(Prefs::normalizeUrl)
+                if (url == null || !Prefs.isAvito(url)) {
+                    tg(cfg, "Это не похоже на ссылку Avito. Пришлите ссылку вида https://www.avito.ru/...", keyboard = cancelKb())
+                    return
+                }
+                val s = Search(id = Search.newId(), name = Search.guessName(url), url = url)
+                prefs.addSearch(s)
+                pending = null
+                ScannerHub.checkNow()
+                tg(
+                    cfg,
+                    "✅ Поиск «${esc(s.name)}» добавлен. Первая проверка будет тихой — потом пришлю новые объявления.",
+                    keyboard = TelegramClient.keyboard(
+                        listOf(TelegramClient.cbButton("💵 Цена", "s:p:${s.id}"), TelegramClient.cbButton("🚫 Стоп-слова", "s:w:${s.id}")),
+                        listOf(TelegramClient.cbButton("✏️ Название", "s:n:${s.id}")),
+                    ),
+                )
+            }
+            Pending.Interval -> {
+                val n = text.filter { it.isDigit() }.toIntOrNull()
+                if (n == null) return tg(cfg, "Пришлите число секунд, например 60.", keyboard = cancelKb())
+                prefs.intervalSec = n.coerceAtLeast(Prefs.MIN_INTERVAL)
+                pending = null
+                tg(cfg, "✅ Интервал: ${prefs.intervalSec} с (+4–13 с случайно)")
+            }
+            is Pending.Price -> {
+                val nums = Regex("\\d[\\d  ]*").findAll(text).mapNotNull { it.value.filter(Char::isDigit).take(12).toLongOrNull() }.toList()
+                if (nums.isEmpty()) return tg(cfg, "Пришлите одно или два числа, например <code>10000 50000</code>.", keyboard = cancelKb())
+                val min = nums[0].takeIf { it > 0 }
+                val max = nums.getOrNull(1)?.takeIf { it > 0 }
+                prefs.updateSearch(p.id) { it.copy(priceMin = min, priceMax = max) }
+                pending = null
+                tg(cfg, "✅ «${esc(prefs.search(p.id)?.name.orEmpty())}»: ${prefs.search(p.id)?.priceText()}")
+            }
+            is Pending.Words -> {
+                val words = if (text.trim() == "-") emptyList() else Search.parseWords(text)
+                prefs.updateSearch(p.id) { it.copy(stopWords = words) }
+                pending = null
+                tg(cfg, "✅ Стоп-слова: ${esc(prefs.search(p.id)?.wordsText().orEmpty())}")
+            }
+            is Pending.Name -> {
+                val name = text.trim().take(40)
+                if (name.isBlank()) return
+                prefs.updateSearch(p.id) { it.copy(name = name) }
+                pending = null
+                tg(cfg, "✅ Название: ${esc(name)}")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ экраны бота
+
+    private suspend fun showStatus(cfg: Config) {
         val s = ScannerHub.stats.value
         val state = when {
             ScannerHub.captcha.value -> "⚠️ ждёт капчу"
@@ -415,42 +542,118 @@ class AvitoParserService : Service() {
             s.busy -> "🔄 проверяет"
             else -> "▶️ работает"
         }
-        val next = if (s.nextCheck > 0) {
-            val sec = ((s.nextCheck - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
-            "через $sec с"
-        } else "—"
-        return buildString {
+        val next = if (s.nextCheck > 0) "через ${((s.nextCheck - System.currentTimeMillis()) / 1000).coerceAtLeast(0)} с" else "—"
+        val text = buildString {
             append("📊 <b>Avito Monitor</b> — ").append(state).append('\n')
-            append("Циклов: <b>").append(s.cycles).append("</b> · последний: ")
+            append("Проверок: <b>").append(s.cycles).append("</b> · последняя: ")
                 .append(if (s.lastCheck > 0) time(s.lastCheck) else "—").append('\n')
-            append("Следующая проверка: ").append(next).append('\n')
-            append("На странице: <b>").append(s.lastFound).append("</b> · в базе: ").append(seen.size()).append('\n')
-            append("Отправлено за сессию: <b>").append(s.sentTotal).append("</b> · капч: ").append(s.captchas).append("\n\n")
-            append(TelegramClient.esc(cfg.describeFilters())).append('\n')
-            append("🔎 <a href=\"").append(TelegramClient.esc(cfg.url)).append("\">Открыть поиск</a>")
+            append("Следующая: ").append(next).append(" · интервал ").append(cfg.intervalSec).append(" с\n")
+            append("Отправлено за сессию: <b>").append(s.sentTotal).append("</b> · в базе: ").append(seen.size())
+                .append(" · капч: ").append(s.captchas).append("\n\n")
+            val stats = ScannerHub.searchStats.value
+            cfg.searches.forEach { search ->
+                val st = stats[search.id]
+                append(if (search.enabled) "▶️ " else "⏸ ").append("<b>").append(esc(search.name)).append("</b>")
+                if (st != null) append(" — на странице ").append(st.found).append(", отправлено ").append(st.sent)
+                append('\n')
+            }
         }
+        tg(cfg, text, keyboard = statusKeyboard())
     }
 
-    private fun statusKeyboard(): String {
-        val pauseBtn = if (ScannerHub.paused.value) {
-            TelegramClient.cbButton("▶️ Продолжить", "/resume")
-        } else {
-            TelegramClient.cbButton("⏸ Пауза", "/pause")
+    private suspend fun showMarket(cfg: Config, onlyId: String?) {
+        val stats = ScannerHub.searchStats.value
+        val list = cfg.searches.filter { onlyId == null || it.id == onlyId }
+        if (list.isEmpty()) return tg(cfg, "Нет поисков. Добавьте: 🔎 Поиски → ➕")
+        val blocks = list.map { s ->
+            val st = stats[s.id]
+            if (st == null || st.items.isEmpty()) {
+                "💰 <b>${esc(s.name)}</b>\nЕщё нет данных — дождитесь проверки."
+            } else {
+                TelegramClient.formatMarket(s, MarketSummary.of(st.items, s), st.found)
+            }
         }
-        return TelegramClient.keyboard(
-            listOf(pauseBtn, TelegramClient.cbButton("🔄 Проверить", "/check")),
-            listOf(TelegramClient.cbButton("📸 Скрин", "/screen"), TelegramClient.cbButton("📊 Статус", "/status")),
+        tg(cfg, blocks.joinToString("\n\n"))
+    }
+
+    private suspend fun showSearches(cfg: Config) {
+        if (cfg.searches.isEmpty()) {
+            return tg(
+                cfg, "🔎 Поисков пока нет.",
+                keyboard = TelegramClient.keyboard(listOf(TelegramClient.cbButton("➕ Добавить поиск", "s:a"))),
+            )
+        }
+        val text = buildString {
+            append("🔎 <b>Поиски</b> (").append(cfg.searches.size).append(")\n\n")
+            cfg.searches.forEachIndexed { i, s ->
+                append(i + 1).append(". ").append(if (s.enabled) "▶️ " else "⏸ ").append("<b>").append(esc(s.name)).append("</b>\n")
+                append("    ").append(s.priceText()).append(" · ").append(esc(s.wordsText())).append('\n')
+            }
+            append("\nНажмите на поиск, чтобы изменить. ⏯ — включить/выключить.")
+        }
+        val rows = cfg.searches.map { s ->
+            listOf(
+                TelegramClient.cbButton("${if (s.enabled) "▶️" else "⏸"} ${s.name}".take(40), "s:e:${s.id}"),
+                TelegramClient.cbButton("⏯", "s:t:${s.id}"),
+                TelegramClient.cbButton("💰", "mk:${s.id}"),
+            )
+        } + listOf(listOf(TelegramClient.cbButton("➕ Добавить поиск", "s:a")))
+        tg(cfg, text, keyboard = TelegramClient.keyboard(*rows.toTypedArray()))
+    }
+
+    private suspend fun showSettings(cfg: Config) {
+        tg(
+            cfg,
+            "⚙️ <b>Настройки</b>\nИнтервал: ${cfg.intervalSec} с (+4–13 с случайно)\nВложение: ${cfg.attach.title}",
+            keyboard = TelegramClient.keyboard(
+                listOf(TelegramClient.cbButton("⏱ Интервал", "iv"), TelegramClient.cbButton("🖼 Вложение", "at")),
+                listOf(TelegramClient.cbButton("🔎 Поиски", "sl")),
+            ),
         )
     }
 
+    private suspend fun checkNow(cfg: Config) {
+        if (ScannerHub.paused.value) {
+            tg(cfg, "Сейчас пауза. Нажмите «▶️ Продолжить».")
+        } else {
+            ScannerHub.checkNow()
+            tg(cfg, "🔄 Проверяю прямо сейчас…")
+        }
+    }
+
+    private suspend fun setPaused(cfg: Config, pause: Boolean) {
+        ScannerHub.paused.value = pause
+        ScannerHub.checkNow()
+        tg(cfg, if (pause) "⏸ Мониторинг на паузе." else "▶️ Продолжаю, проверяю сейчас.")
+    }
+
+    private fun searchCard(s: Search) = buildString {
+        append(if (s.enabled) "▶️ " else "⏸ ").append("<b>").append(esc(s.name)).append("</b>\n")
+        append("💵 ").append(s.priceText()).append('\n')
+        append("🚫 ").append(esc(s.wordsText())).append('\n')
+        append("🔗 <a href=\"").append(esc(s.url)).append("\">Открыть поиск</a>")
+    }
+
+    private fun statusKeyboard(): String = TelegramClient.keyboard(
+        listOf(
+            if (ScannerHub.paused.value) TelegramClient.cbButton("▶️ Продолжить", "rs") else TelegramClient.cbButton("⏸ Пауза", "pz"),
+            TelegramClient.cbButton("🔄 Проверить", "chk"),
+        ),
+        listOf(TelegramClient.cbButton("💰 Цены рынка", "mk"), TelegramClient.cbButton("📸 Скрин", "scr")),
+    )
+
+    private fun cancelKb() = TelegramClient.keyboard(listOf(TelegramClient.cbButton("✖️ Отмена", "x")))
+
     private suspend fun sendScreen(cfg: Config, caption: String): Boolean {
         val jpeg = ScannerHub.driver?.screenshot() ?: return false
-        val r = TelegramClient.sendPhotoBytes(cfg.token, cfg.chatId, jpeg, "📸 " + TelegramClient.esc(caption))
+        val r = TelegramClient.sendPhotoBytes(cfg.token, cfg.chatId, jpeg, "📸 " + esc(caption))
         r.onFailure { AppLog.e("Скриншот: ${it.message}") }
         return r.isSuccess
     }
 
     // ------------------------------------------------------------------ helpers
+
+    private fun esc(s: String) = TelegramClient.esc(s)
 
     private suspend fun tg(cfg: Config, html: String, keyboard: String? = null) {
         TelegramClient.send(cfg.token, cfg.chatId, html, preview = false, keyboard = keyboard)
@@ -499,18 +702,16 @@ class AvitoParserService : Service() {
         private const val MAX_PER_CYCLE = 20
 
         private val HELP = """
-            🤖 <b>Avito Monitor — команды</b>
+            🤖 <b>Avito Monitor</b>
 
-            /status — состояние, статистика, кнопки
-            /check — проверить прямо сейчас
-            /pause, /resume — пауза / продолжить
-            /screen — скриншот браузера на телефоне
-            /filters — текущие фильтры
-            /price 1000 50000 — вилка цен (<code>/price off</code> — сброс)
-            /words битый, ремонт — стоп-слова (<code>/words off</code>)
-            /interval 60 — интервал, сек
-            /url ссылка — новая ссылка поиска
-            /attach card|page|photo|none — что прикладывать к объявлениям
+            Управление — кнопками внизу 👇
+            📊 Статус — состояние и статистика
+            🔄 Проверить — проверить прямо сейчас
+            ⏸ Пауза / ▶️ Продолжить
+            💰 Цены рынка — медиана и диапазон цен по каждому поиску
+            📸 Скрин — что сейчас на экране телефона
+            🔎 Поиски — список, добавить, цена, стоп-слова, удалить
+            ⚙️ Настройки — интервал и что прикладывать к объявлениям
 
             Бот отвечает только в этом чате и только пока на телефоне нажат «Старт».
         """.trimIndent()
