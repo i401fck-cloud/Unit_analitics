@@ -196,9 +196,29 @@ class WebViewDriver(private val webView: WebView) {
         if (withTimeoutOrNull(PAGE_TIMEOUT_MS) { loaded.await() } == null) {
             return@withContext ParseResult.Error("страница не загрузилась за ${PAGE_TIMEOUT_MS / 1000} с")
         }
-        delay(Random.nextLong(3_000, 5_001)) // даём SPA дорендерить карточки
+        // onPageFinished у SPA приходит раньше, чем нарисованы карточки: ждём реальный контент
+        delay(Random.nextLong(1_500, 2_500))
+        if (!waitForContent(RENDER_TIMEOUT_MS)) {
+            AppLog.w("Страница долго рисуется — парсю как есть")
+        }
+        delay(Random.nextLong(1_000, 2_500)) // догрузка картинок и цен
         humanScroll()
         runParser()
+    }
+
+    /** Ждёт, пока на странице появятся ссылки/текст (или капча). true — дождались. */
+    private suspend fun waitForContent(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val ready = evalJs(
+                "(function(){var b=document.body;if(!b)return false;var t=(b.innerText||'');" +
+                    "return document.querySelectorAll('a[href]').length>15||t.length>1500||" +
+                    "/робот|доступ ограничен|проблема с ip|captcha/i.test(t);})()"
+            )
+            if (ready == "true") return true
+            delay(700)
+        }
+        return false
     }
 
     /** Парсинг текущей страницы без перезагрузки (используется во время ожидания капчи). */
@@ -254,7 +274,14 @@ class WebViewDriver(private val webView: WebView) {
                 )
             }
         }
-        val diag = o.optJSONObject("diag")?.let { d ->
+        val rawDiag = o.optJSONObject("diag")
+        if (items.isEmpty() && rawDiag != null &&
+            rawDiag.optInt("bodyTextLength") == 0 && rawDiag.optInt("linksWithHref") == 0
+        ) {
+            // Пустой документ — страница не успела отрисоваться (медленная сеть). Это не «0 карточек».
+            return ParseResult.Error("страница не отрисовалась (пустая), повторю в следующем цикле")
+        }
+        val diag = rawDiag?.let { d ->
             buildString {
                 append("URL: ").append(pageUrl).append('\n')
                 append("Заголовок: ").append(o.optString("title")).append('\n')
@@ -293,5 +320,6 @@ class WebViewDriver(private val webView: WebView) {
     companion object {
         private const val PAGE_TIMEOUT_MS = 45_000L
         private const val JS_TIMEOUT_MS = 15_000L
+        private const val RENDER_TIMEOUT_MS = 25_000L
     }
 }
