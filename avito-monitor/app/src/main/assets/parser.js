@@ -184,6 +184,13 @@
       add(aid, findCard(a, aid), a);
     }
 
+    // Запоминаем элементы карточек (невидимое свойство) — для скриншота конкретной карточки
+    try {
+      var map = {};
+      for (var q = 0; q < order.length; q++) map[order[q]] = cards[order[q]].card;
+      Object.defineProperty(window, '__amc', { value: map, configurable: true, writable: true, enumerable: false });
+    } catch (e) { /* не критично */ }
+
     var items = [];
     for (var k = 0; k < order.length && items.length < 120; k++) {
       var c = cards[order[k]];

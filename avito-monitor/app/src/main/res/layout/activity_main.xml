@@ -519,13 +519,54 @@
                                         android:maxLines="1" />
                                 </com.google.android.material.textfield.TextInputLayout>
 
-                                <com.google.android.material.materialswitch.MaterialSwitch
-                                    android:id="@+id/switchPhotos"
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="Что прикладывать к объявлению"
+                                    android:textColor="@color/text"
+                                    android:textSize="13sp" />
+
+                                <com.google.android.material.button.MaterialButtonToggleGroup
+                                    android:id="@+id/attachGroup"
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="6dp"
-                                    android:text="Присылать фото объявлений"
-                                    android:textColor="@color/text" />
+                                    app:selectionRequired="true"
+                                    app:singleSelection="true">
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachCard"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Карточка" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachPage"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Страница" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachPhoto"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Фото" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachNone"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Текст" />
+                                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                                <TextView
+                                    android:id="@+id/tvAttachHint"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="12sp" />
 
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btnTestTg"
@@ -541,7 +582,7 @@
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="8dp"
-                                    android:text="Бот понимает команды: /status, /check, /pause, /resume, /screen, /price, /words, /interval, /url, /help"
+                                    android:text="Бот понимает команды: /status, /check, /pause, /resume, /screen, /price, /words, /interval, /url, /attach, /help"
                                     android:textColor="@color/text_faint"
                                     android:textSize="12sp" />
                             </LinearLayout>

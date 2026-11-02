@@ -29,7 +29,7 @@ data class Config(
     val stopWords: List<String>,
     val priceMin: Long?,
     val priceMax: Long?,
-    val sendPhotos: Boolean = true,
+    val attach: AttachMode = AttachMode.CARD,
 ) {
     fun describeFilters(): String {
         val price = when {
@@ -39,7 +39,7 @@ data class Config(
             else -> "любая"
         }
         val words = if (stopWords.isEmpty()) "нет" else stopWords.joinToString(", ")
-        return "Цена: $price\nСтоп-слова: $words\nИнтервал: $intervalSec с (+15–40 с случайно)"
+        return "Цена: $price\nСтоп-слова: $words\nИнтервал: $intervalSec с (+15–40 с случайно)\nВложение: ${attach.title}"
     }
 
     /** Возвращает причину отсева или null, если объявление проходит фильтры. */
@@ -50,5 +50,17 @@ data class Config(
         if (priceMin != null && p < priceMin) return "цена $p < $priceMin"
         if (priceMax != null && p > priceMax) return "цена $p > $priceMax"
         return null
+    }
+}
+
+/** Что прикладывать к найденному объявлению в Telegram. */
+enum class AttachMode(val key: String, val title: String) {
+    CARD("card", "скриншот карточки"),
+    PAGE("page", "скриншот страницы объявления"),
+    PHOTO("photo", "фото из объявления"),
+    NONE("none", "только текст");
+
+    companion object {
+        fun of(key: String?) = entries.firstOrNull { it.key == key } ?: CARD
     }
 }

@@ -29,9 +29,9 @@ class Prefs(context: Context) {
         get() = sp.getString("price_max", "").orEmpty()
         set(v) = sp.edit().putString("price_max", v).apply()
 
-    var sendPhotos: Boolean
-        get() = sp.getBoolean("send_photos", true)
-        set(v) = sp.edit().putBoolean("send_photos", v).apply()
+    var attachMode: AttachMode
+        get() = AttachMode.of(sp.getString("attach_mode", null))
+        set(v) = sp.edit().putString("attach_mode", v.key).apply()
 
     /** Автоматически включать ночной экран после простоя. */
     var autoNight: Boolean
@@ -62,7 +62,7 @@ class Prefs(context: Context) {
         stopWords = stopWords.split(',', ';', '\n').map { it.trim().lowercase() }.filter { it.isNotEmpty() },
         priceMin = priceMin.filter { it.isDigit() }.toLongOrNull(),
         priceMax = priceMax.filter { it.isDigit() }.toLongOrNull(),
-        sendPhotos = sendPhotos,
+        attach = attachMode,
     )
 
     companion object {

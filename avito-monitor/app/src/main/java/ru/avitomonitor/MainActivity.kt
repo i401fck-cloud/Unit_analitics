@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity() {
             "price_max" -> setField(b.etPriceMax, prefs.priceMax)
             "stop_words" -> setField(b.etStopWords, prefs.stopWords)
             "interval" -> setField(b.etInterval, prefs.intervalSec.toString())
+            "attach_mode" -> showAttachMode(prefs.attachMode)
         }
     }
 
@@ -270,7 +271,17 @@ class MainActivity : AppCompatActivity() {
         }
         b.btnClear.setOnClickListener { confirmClear() }
         b.btnTestTg.setOnClickListener { testTelegram() }
-        b.switchPhotos.setOnCheckedChangeListener { _, c -> prefs.sendPhotos = c }
+        b.attachGroup.addOnButtonCheckedListener { _, id, checked ->
+            if (!checked) return@addOnButtonCheckedListener
+            val mode = when (id) {
+                R.id.attachPage -> AttachMode.PAGE
+                R.id.attachPhoto -> AttachMode.PHOTO
+                R.id.attachNone -> AttachMode.NONE
+                else -> AttachMode.CARD
+            }
+            if (prefs.attachMode != mode) prefs.attachMode = mode
+            renderAttachHint(mode)
+        }
         b.switchAutoNight.setOnCheckedChangeListener { _, c ->
             prefs.autoNight = c
             scheduleAutoNight()
@@ -344,8 +355,28 @@ class MainActivity : AppCompatActivity() {
         setField(b.etStopWords, prefs.stopWords)
         setField(b.etPriceMin, prefs.priceMin)
         setField(b.etPriceMax, prefs.priceMax)
-        b.switchPhotos.isChecked = prefs.sendPhotos
+        showAttachMode(prefs.attachMode)
         b.switchAutoNight.isChecked = prefs.autoNight
+    }
+
+    private fun showAttachMode(mode: AttachMode) {
+        val id = when (mode) {
+            AttachMode.CARD -> R.id.attachCard
+            AttachMode.PAGE -> R.id.attachPage
+            AttachMode.PHOTO -> R.id.attachPhoto
+            AttachMode.NONE -> R.id.attachNone
+        }
+        if (b.attachGroup.checkedButtonId != id) b.attachGroup.check(id)
+        renderAttachHint(mode)
+    }
+
+    private fun renderAttachHint(mode: AttachMode) {
+        b.tvAttachHint.text = when (mode) {
+            AttachMode.CARD -> "Скриншот карточки из выдачи + описание + ссылка. Быстро, без лишних запросов."
+            AttachMode.PAGE -> "Открывает объявление и присылает скрин его страницы. Подробнее, но медленнее и чаще ведёт к капче."
+            AttachMode.PHOTO -> "Главное фото из объявления + описание + ссылка."
+            AttachMode.NONE -> "Только текст и ссылка."
+        }
     }
 
     private fun setField(et: EditText, value: String) {

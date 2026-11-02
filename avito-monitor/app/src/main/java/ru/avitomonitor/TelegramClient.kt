@@ -123,7 +123,7 @@ object TelegramClient {
     /** Карточка объявления: фото + подпись + кнопка «Открыть». Если фото не прошло — текстом. */
     suspend fun sendListing(cfg: Config, item: Listing): Result<Unit> {
         val kb = keyboard(listOf(urlButton("🔗 Открыть на Avito", item.url)))
-        if (cfg.sendPhotos && item.imageUrl.startsWith("http")) {
+        if (cfg.attach != AttachMode.NONE && item.imageUrl.startsWith("http")) {
             val r = sendPhotoUrl(cfg.token, cfg.chatId, item.imageUrl, formatListing(item, 1024), kb)
             if (r.isSuccess) return r
             AppLog.w("Фото не отправилось (${r.exceptionOrNull()?.message}), шлю текстом")
@@ -150,6 +150,7 @@ object TelegramClient {
             "words" to "Стоп-слова: /words битый, ремонт или /words off",
             "interval" to "Интервал в секундах: /interval 60",
             "url" to "Новая ссылка поиска: /url https://...",
+            "attach" to "Вложение: /attach card | page | photo | none",
             "help" to "Список команд",
         ).forEach { (c, d) -> cmds.put(JSONObject().put("command", c).put("description", d)) }
         val body = FormBody.Builder().add("commands", cmds.toString()).build()

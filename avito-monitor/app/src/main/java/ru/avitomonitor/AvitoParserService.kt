@@ -193,7 +193,7 @@ class AvitoParserService : Service() {
                 AppLog.i("Отсеяно ($reason): ${item.title.take(40)}")
                 continue
             }
-            val r = TelegramClient.sendListing(cfg, item)
+            val r = sendItem(cfg, item)
             if (r.isSuccess) {
                 seen.add(item.id)
                 sent++
@@ -209,6 +209,34 @@ class AvitoParserService : Service() {
 
         val msg = "Цикл #$cycle: на странице ${items.size}, новых ${fresh.size}, отправлено $sent, отсеяно $filtered"
         if (failed) AppLog.w(msg) else AppLog.ok(msg)
+    }
+
+    /** Скриншот (карточки или страницы) + описание + кнопка-ссылка; при неудаче — фото, затем текст. */
+    private suspend fun sendItem(cfg: Config, item: Listing): Result<Unit> {
+        val driver = ScannerHub.driver
+        val shot = try {
+            when (cfg.attach) {
+                AttachMode.CARD -> driver?.screenshotCard(item.id)
+                AttachMode.PAGE -> {
+                    delay(Random.nextLong(1_500, 4_000)) // пауза перед переходом, как у человека
+                    driver?.screenshotPage(item.url)
+                }
+                else -> null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        if (shot != null) {
+            val kb = TelegramClient.keyboard(listOf(TelegramClient.urlButton("🔗 Открыть на Avito", item.url)))
+            val r = TelegramClient.sendPhotoBytes(cfg.token, cfg.chatId, shot, TelegramClient.formatListing(item, 1024), kb)
+            if (r.isSuccess) return r
+            AppLog.w("Скриншот не отправился (${r.exceptionOrNull()?.message}), пробую фото/текст")
+        } else if (cfg.attach == AttachMode.CARD || cfg.attach == AttachMode.PAGE) {
+            AppLog.w("Скриншот не получился, отправляю фото/текст")
+        }
+        return TelegramClient.sendListing(cfg, item)
     }
 
     private suspend fun waitForCaptcha(cycle: Int, cfg: Config, first: ParseResult.Captcha) {
@@ -359,6 +387,22 @@ class AvitoParserService : Service() {
                     tg(cfg, "✅ Новая ссылка сохранена. Первый проход по ней будет тихим.")
                 }
             }
+            "/attach" -> {
+                val mode = AttachMode.entries.firstOrNull { it.key == arg.lowercase() }
+                if (mode == null) {
+                    tg(
+                        cfg,
+                        "Что прикладывать к объявлениям:\n" +
+                            "<code>/attach card</code> — скриншот карточки (быстро)\n" +
+                            "<code>/attach page</code> — скриншот страницы объявления (медленнее)\n" +
+                            "<code>/attach photo</code> — фото из объявления\n" +
+                            "<code>/attach none</code> — только текст\n\nСейчас: ${cfg.attach.title}",
+                    )
+                } else {
+                    prefs.attachMode = mode
+                    tg(cfg, "✅ Вложение: ${mode.title}")
+                }
+            }
             else -> tg(cfg, "Не знаю такую команду. /help — список команд.")
         }
     }
@@ -466,6 +510,7 @@ class AvitoParserService : Service() {
             /words битый, ремонт — стоп-слова (<code>/words off</code>)
             /interval 60 — интервал, сек
             /url ссылка — новая ссылка поиска
+            /attach card|page|photo|none — что прикладывать к объявлениям
 
             Бот отвечает только в этом чате и только пока на телефоне нажат «Старт».
         """.trimIndent()
