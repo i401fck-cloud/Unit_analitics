@@ -1,0 +1,693 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Один макет на все режимы. MainActivity сама раскладывает его по ширине окна:
+  < 600dp (внешний экран Find N2, разделённый экран) — вкладки Обзор / Браузер / Настройки;
+  ≥ 600dp (внутренний экран) — две колонки: слева управление, справа браузер.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:id="@+id/main"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Верхняя панель -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="18dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="8dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Resale Monitor"
+                    android:textColor="@color/text"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Сканер новых объявлений"
+                    android:textColor="@color/text_dim"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/statusPill"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="6dp">
+
+                <View
+                    android:id="@+id/statusDot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/bg_dot" />
+
+                <TextView
+                    android:id="@+id/tvStatusPill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="7dp"
+                    android:text="Остановлен"
+                    android:textColor="@color/text"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNight"
+                style="@style/BarBtn"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="4dp"
+                android:contentDescription="Ночной экран"
+                app:icon="@drawable/ic_moon" />
+        </LinearLayout>
+
+        <!-- Панели: ориентация и состав меняются в коде -->
+        <LinearLayout
+            android:id="@+id/panes"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingHorizontal="12dp"
+            android:paddingBottom="10dp">
+
+            <LinearLayout
+                android:id="@+id/leftPane"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/tabs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:selectionRequired="true"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tabOverview"
+                        style="@style/Tab"
+                        android:text="Обзор" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tabBrowser"
+                        style="@style/Tab"
+                        android:text="Браузер" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tabSettings"
+                        style="@style/Tab"
+                        android:text="Настройки" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                <FrameLayout
+                    android:id="@+id/contentArea"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="10dp"
+                    android:layout_weight="1">
+
+                    <!-- Браузер (в узком режиме лежит под панелями и всегда имеет размер) -->
+                    <LinearLayout
+                        android:id="@+id/webCard"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_card"
+                        android:orientation="vertical"
+                        android:padding="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingStart="14dp"
+                            android:paddingEnd="4dp">
+
+                            <TextView
+                                android:id="@+id/tvWebUrl"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:ellipsize="middle"
+                                android:singleLine="true"
+                                android:text="wildberries.ru"
+                                android:textColor="@color/text_dim"
+                                android:textSize="12sp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnWebBack"
+                                style="@style/BarBtn"
+                                android:contentDescription="Назад"
+                                app:icon="@drawable/ic_back" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnWebReload"
+                                style="@style/BarBtn"
+                                android:contentDescription="Обновить"
+                                app:icon="@drawable/ic_refresh" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnWebHome"
+                                style="@style/BarBtn"
+                                android:contentDescription="Открыть поиск"
+                                app:icon="@drawable/ic_home" />
+                        </LinearLayout>
+
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/webProgress"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:indeterminate="false"
+                            android:visibility="invisible"
+                            app:indicatorColor="@color/accent2"
+                            app:trackColor="@android:color/transparent"
+                            app:trackThickness="2dp" />
+
+                        <WebView
+                            android:id="@+id/webView"
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1" />
+                    </LinearLayout>
+
+                    <!-- Обзор -->
+                    <androidx.core.widget.NestedScrollView
+                        android:id="@+id/overviewPanel"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@color/bg"
+                        android:clipToPadding="false"
+                        android:scrollbars="none">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+
+                            <!-- Главная карточка статуса -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/bg_hero"
+                                android:orientation="vertical"
+                                android:padding="18dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:letterSpacing="0.08"
+                                    android:text="СОСТОЯНИЕ"
+                                    android:textColor="@color/text_dim"
+                                    android:textSize="11sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvHeroTitle"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Остановлен"
+                                    android:textColor="@color/text"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvHeroDetail"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Заполните настройки и нажмите «Старт»"
+                                    android:textColor="@color/text_dim"
+                                    android:textSize="13sp" />
+
+                                <TextView
+                                    android:id="@+id/tvCountdown"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:fontFeatureSettings="tnum"
+                                    android:textColor="@color/accent2"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold"
+                                    android:visibility="gone" />
+
+                                <com.google.android.material.progressindicator.LinearProgressIndicator
+                                    android:id="@+id/busyProgress"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:indeterminate="true"
+                                    android:visibility="invisible"
+                                    app:indicatorColor="@color/accent"
+                                    app:trackColor="#22FFFFFF"
+                                    app:trackCornerRadius="2dp"
+                                    app:trackThickness="3dp" />
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnStartStop"
+                                        android:layout_width="0dp"
+                                        android:layout_height="56dp"
+                                        android:layout_weight="1"
+                                        android:insetTop="0dp"
+                                        android:insetBottom="0dp"
+                                        android:text="Старт"
+                                        android:textSize="16sp"
+                                        android:textStyle="bold"
+                                        app:cornerRadius="18dp"
+                                        app:icon="@drawable/ic_play"
+                                        app:iconGravity="textStart" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnPause"
+                                        style="@style/IconBtn"
+                                        android:contentDescription="Пауза"
+                                        app:icon="@drawable/ic_pause" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnCheckNow"
+                                        style="@style/IconBtn"
+                                        android:contentDescription="Проверить сейчас"
+                                        app:icon="@drawable/ic_refresh" />
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <!-- Статистика 2×2 -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:orientation="horizontal">
+
+                                <LinearLayout style="@style/StatTile">
+
+                                    <TextView android:id="@+id/statCycles" style="@style/StatValue" />
+
+                                    <TextView style="@style/StatLabel" android:text="проверок" />
+                                </LinearLayout>
+
+                                <Space
+                                    android:layout_width="10dp"
+                                    android:layout_height="1dp" />
+
+                                <LinearLayout style="@style/StatTile">
+
+                                    <TextView android:id="@+id/statFound" style="@style/StatValue" />
+
+                                    <TextView style="@style/StatLabel" android:text="на странице" />
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:orientation="horizontal">
+
+                                <LinearLayout style="@style/StatTile">
+
+                                    <TextView
+                                        android:id="@+id/statSent"
+                                        style="@style/StatValue"
+                                        android:textColor="@color/green" />
+
+                                    <TextView style="@style/StatLabel" android:text="отправлено" />
+                                </LinearLayout>
+
+                                <Space
+                                    android:layout_width="10dp"
+                                    android:layout_height="1dp" />
+
+                                <LinearLayout style="@style/StatTile">
+
+                                    <TextView android:id="@+id/statBase" style="@style/StatValue" />
+
+                                    <TextView style="@style/StatLabel" android:text="в базе ID" />
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <!-- Поиски: последние результаты и медиана цены -->
+                            <LinearLayout
+                                android:id="@+id/overviewSearchesCard"
+                                style="@style/Card">
+
+                                <TextView style="@style/CardTitle" android:text="Поиски" />
+
+                                <LinearLayout
+                                    android:id="@+id/overviewSearches"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical" />
+                            </LinearLayout>
+
+                            <!-- Журнал -->
+                            <LinearLayout style="@style/Card">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <TextView
+                                        style="@style/CardTitle"
+                                        android:layout_width="0dp"
+                                        android:layout_weight="1"
+                                        android:text="Журнал" />
+
+                                    <TextView
+                                        android:id="@+id/btnClearLog"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:background="?attr/selectableItemBackground"
+                                        android:padding="4dp"
+                                        android:text="очистить"
+                                        android:textColor="@color/accent"
+                                        android:textSize="12sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:id="@+id/tvLog"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:background="@drawable/bg_log"
+                                    android:fontFamily="monospace"
+                                    android:lineSpacingExtra="3dp"
+                                    android:minHeight="120dp"
+                                    android:padding="10dp"
+                                    android:text="Здесь появится журнал работы"
+                                    android:textColor="@color/text_dim"
+                                    android:textIsSelectable="true"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </androidx.core.widget.NestedScrollView>
+
+                    <!-- Настройки -->
+                    <androidx.core.widget.NestedScrollView
+                        android:id="@+id/settingsPanel"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@color/bg"
+                        android:scrollbars="none"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:paddingBottom="12dp">
+
+                            <!-- Поиски -->
+                            <LinearLayout
+                                style="@style/Card"
+                                android:layout_marginTop="0dp">
+
+                                <TextView style="@style/CardTitle" android:text="🔎  Поиски" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Каждый поиск — своя ссылка, цена и стоп-слова. Нажмите, чтобы изменить."
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="12sp" />
+
+                                <LinearLayout
+                                    android:id="@+id/searchList"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnAddSearch"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:text="＋  Добавить поиск" />
+                            </LinearLayout>
+
+                            <!-- Telegram -->
+                            <LinearLayout style="@style/Card">
+
+                                <TextView style="@style/CardTitle" android:text="✈️  Telegram" />
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    style="@style/Field"
+                                    android:hint="Bot Token (от @BotFather)"
+                                    app:endIconMode="password_toggle">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etToken"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:inputType="textPassword"
+                                        android:maxLines="1" />
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    style="@style/Field"
+                                    android:hint="Chat ID">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etChatId"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1" />
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="Что прикладывать к объявлению"
+                                    android:textColor="@color/text"
+                                    android:textSize="13sp" />
+
+                                <com.google.android.material.button.MaterialButtonToggleGroup
+                                    android:id="@+id/attachGroup"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    app:selectionRequired="true"
+                                    app:singleSelection="true">
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachCard"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Карточка" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachPage"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Страница" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachPhoto"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Фото" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/attachNone"
+                                        style="@style/Tab"
+                                        android:textSize="12sp"
+                                        android:text="Текст" />
+                                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                                <TextView
+                                    android:id="@+id/tvAttachHint"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="12sp" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnTestTg"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="Проверить Telegram"
+                                    app:icon="@drawable/ic_send"
+                                    app:iconGravity="textStart" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:text="В Telegram управление — кнопками под полем ввода: статус, проверка, пауза, цены рынка, скрин, поиски, настройки. Если кнопок нет — отправьте боту /start."
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="12sp" />
+                            </LinearLayout>
+
+                            <!-- Режим работы -->
+                            <LinearLayout style="@style/Card">
+
+                                <TextView style="@style/CardTitle" android:text="⏱  Режим работы" />
+
+                                <com.google.android.material.textfield.TextInputLayout
+                                    style="@style/Field"
+                                    android:hint="Интервал, сек (мин. 30)"
+                                    app:helperText="К интервалу добавляется случайно 4–13 с">
+
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etInterval"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:inputType="number"
+                                        android:maxLines="1" />
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <com.google.android.material.materialswitch.MaterialSwitch
+                                    android:id="@+id/switchAutoNight"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:text="Ночной экран через 2 мин без касаний"
+                                    android:textColor="@color/text" />
+                            </LinearLayout>
+
+                            <!-- База -->
+                            <LinearLayout style="@style/Card">
+
+                                <TextView style="@style/CardTitle" android:text="🗂  База объявлений" />
+
+                                <TextView
+                                    android:id="@+id/tvBaseInfo"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:textColor="@color/text_dim"
+                                    android:textSize="13sp" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnClear"
+                                    style="@style/Widget.Material3.Button.OutlinedButton"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="6dp"
+                                    android:text="Очистить базу ID"
+                                    android:textColor="@color/red"
+                                    app:icon="@drawable/ic_delete"
+                                    app:iconGravity="textStart"
+                                    app:iconTint="@color/red"
+                                    app:strokeColor="@color/stroke" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSave"
+                                android:layout_width="match_parent"
+                                android:layout_height="56dp"
+                                android:layout_marginTop="12dp"
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:text="Сохранить"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="18dp"
+                                app:icon="@drawable/ic_save"
+                                app:iconGravity="textStart" />
+                        </LinearLayout>
+                    </androidx.core.widget.NestedScrollView>
+                </FrameLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Ночной экран (AOD): чёрный, минимальная яркость, текст смещается против выгорания OLED -->
+    <FrameLayout
+        android:id="@+id/nightOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/aodBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/tvAodTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-light"
+                android:fontFeatureSettings="tnum"
+                android:text="00:00"
+                android:textColor="@color/aod_text"
+                android:textSize="64sp" />
+
+            <TextView
+                android:id="@+id/tvAodStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/aod_text"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tvAodStats"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:textColor="@color/aod_dim"
+                android:textSize="12sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="коснитесь, чтобы выйти"
+                android:textColor="#FF2A2E37"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

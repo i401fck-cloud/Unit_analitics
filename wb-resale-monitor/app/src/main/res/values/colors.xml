@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тёмная тема с фирменной для маркетплейса фиолетово-малиновой гаммой -->
+    <color name="bg">#FF0E0B14</color>
+    <color name="surface">#FF17121F</color>
+    <color name="surface2">#FF201829</color>
+    <color name="stroke">#FF33263F</color>
+    <color name="text">#FFF3EEF8</color>
+    <color name="text_dim">#FF9A8FA8</color>
+    <color name="text_faint">#FF655A73</color>
+    <color name="accent">#FFCB11AB</color>
+    <color name="accent_dark">#FF3D0E3F</color>
+    <color name="accent2">#FFB57CFF</color>
+    <color name="green">#FF22C55E</color>
+    <color name="amber">#FFF59E0B</color>
+    <color name="red">#FFEF4444</color>
+    <color name="grey">#FF6B6478</color>
+    <color name="log_bg">#FF100C16</color>
+    <color name="aod_text">#FF5E5468</color>
+    <color name="aod_dim">#FF3E3647</color>
+</resources>
